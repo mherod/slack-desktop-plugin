@@ -1,10 +1,10 @@
-# Slack Desktop plugin for Claude Code
+# Slack Desktop plugin for Codex, ChatGPT and Claude Code
 
 [![CI](https://github.com/mherod/slack-desktop-plugin/actions/workflows/ci.yml/badge.svg)](https://github.com/mherod/slack-desktop-plugin/actions/workflows/ci.yml)
 
-A Claude Code plugin for working with the **Slack desktop app on macOS** through the macOS accessibility API. It drives the app you are already signed in to, so it needs no Slack API token, bot or workspace admin approval.
+A skill-based plugin for working with the **Slack desktop app on macOS** through the macOS accessibility API. It drives the app you are already signed in to, so it needs no Slack API token, bot or workspace admin approval.
 
-With this plugin, Claude can:
+With this plugin, your assistant can:
 
 - list, inspect and switch between signed-in workspaces
 - list channels and DMs, and read messages, threads and channel members
@@ -25,20 +25,42 @@ It works in the background by default and doesn't take focus from the app you're
 - macOS with the Slack desktop app running and signed in
 - [Bun](https://bun.sh)
 - Xcode Command Line Tools (`xcode-select --install`), used to compile the bundled Swift helper on first use
-- Accessibility and input-event permissions for the app that runs Claude Code, such as Terminal, iTerm or your IDE
+- Accessibility and input-event permissions for the app that runs your assistant, such as ChatGPT, Terminal, iTerm or your IDE
 
 ## Install
+
+### Codex and ChatGPT desktop
+
+From a local clone, register the marketplace and install the plugin:
+
+```sh
+codex plugin marketplace add /absolute/path/to/slack-desktop-plugin
+codex plugin add slack-desktop@slack-desktop-plugin
+```
+
+Restart ChatGPT desktop and select **Slack Desktop** as the source in the Plugins Directory to find the plugin. Start a new chat after installation. Once these files are pushed, you can register the repository remotely instead:
+
+```sh
+codex plugin marketplace add mherod/slack-desktop-plugin
+codex plugin add slack-desktop@slack-desktop-plugin
+```
+
+The host must support local command execution on the Mac running Slack. A cloud-only session cannot run this helper. Grant Accessibility and input-event permissions to the host running your assistant, then run the permission check below.
+
+The portable `plugin.json`, `.codex-plugin/plugin.json` compatibility manifest and `.agents/plugins/marketplace.json` share the same bundled skill. See [OpenAI’s packaging guide](https://developers.openai.com/plugins/build/plugins) for marketplace support. Repository installation is separate from public Plugins Directory submission; this repository does not claim a public listing.
+
+### Claude Code
 
 ```text
 /plugin marketplace add mherod/slack-desktop-plugin
 /plugin install slack-desktop@slack-desktop-plugin
 ```
 
-Then ask Claude something like *"What's new in #general on Slack?"* or *"Search Slack for the deploy checklist"*. The `slack-desktop` skill loads when it's relevant.
+Then ask your assistant something like *"What's new in #general on Slack?"* or *"Search Slack for the deploy checklist"*. The `slack-desktop` skill loads when it's relevant.
 
 ## Quickstart
 
-You don't need to run anything yourself: Claude calls the helper for you. To try the helper directly from a clone:
+You don't need to run anything yourself: your assistant calls the helper for you. To try the helper directly from a clone:
 
 ```sh
 git clone https://github.com/mherod/slack-desktop-plugin.git
@@ -57,7 +79,7 @@ The first time you use it, the skill runs a read-only check:
 bun skills/slack-desktop/scripts/slack.mjs permissions
 ```
 
-If that check reports missing access, run `permissions --request`. This opens **System Settings → Privacy & Security → Accessibility**. Grant access to the app that runs Claude Code, then run the check again. The helper never grants permissions itself.
+If that check reports missing access, run `permissions --request`. This opens **System Settings → Privacy & Security → Accessibility**. Grant access to the app that runs your assistant, then run the check again. The helper never grants permissions itself.
 
 ## Usage
 
@@ -121,19 +143,19 @@ Each read checks the workspace, conversation and message it is looking at before
 
 ## Privacy
 
-Message content stays on your machine and is returned only to the Claude session that asked for it. Options that use the clipboard, such as `--allow-clipboard`, must be given explicitly on each command, and the helper restores your clipboard afterwards on a best-effort basis. Keep saved output out of shared repositories.
+The helper runs locally and returns captured Slack content to the assistant session that requested it. That content is processed under your assistant provider’s data policies; this plugin does not operate a separate backend. Options that use the clipboard, such as `--allow-clipboard`, must be given explicitly on each command, and the helper restores your clipboard afterwards on a best-effort basis. Keep saved output out of shared repositories.
 
 ## Development
 
 ```sh
 bun run test              # unit and native-harness tests
-bun run check:manifests   # plugin.json, marketplace.json and package.json versions agree
+bun run check:manifests   # manifest versions, catalog paths and bundled assets
 bun run validate          # claude plugin validate .
 ```
 
 There are no dependencies to install. The tests drive the Swift helper against stubbed accessibility trees, so they need macOS and the Xcode Command Line Tools but not Slack or any permissions. CI runs the manifest check and the test suite on a hosted macOS runner for every push to `main` and every pull request.
 
-When you release, bump the version in `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` and `package.json` together.
+When you release, bump the version in `plugin.json`, `.codex-plugin/plugin.json`, `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` and `package.json` together. Keep the OpenAI interface metadata in the portable and compatibility manifests identical.
 
 ## Contributing
 

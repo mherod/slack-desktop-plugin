@@ -1,0 +1,31 @@
+{
+  "name": "slack-desktop",
+  "version": "0.1.0",
+  "description": "Read, search and navigate Slack desktop on macOS with a bundled Swift accessibility helper.",
+  "author": {
+    "name": "Matthew Herod",
+    "url": "https://github.com/mherod"
+  },
+  "homepage": "https://github.com/mherod/slack-desktop-plugin",
+  "repository": "https://github.com/mherod/slack-desktop-plugin",
+  "license": "MIT",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Slack Desktop",
+    "shortDescription": "Read and navigate Slack desktop on macOS",
+    "longDescription": "Read, search and navigate Slack desktop on macOS with a bundled Swift accessibility helper.",
+    "developerName": "Matthew Herod",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/mherod/slack-desktop-plugin",
+    "composerIcon": "./.claude-plugin/icon.png",
+    "logo": "./.claude-plugin/icon.png",
+    "defaultPrompt": [
+      "List my Slack workspaces.",
+      "Search Slack for the deploy checklist."
+    ]
+  }
+}
