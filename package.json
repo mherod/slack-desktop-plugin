@@ -1,0 +1,12 @@
+{
+  "name": "slack-desktop-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Claude Code plugin for reading and navigating Slack desktop on macOS.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "bun test skills/slack-desktop/scripts",
+    "validate": "claude plugin validate ."
+  }
+}

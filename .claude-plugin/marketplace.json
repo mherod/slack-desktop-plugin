@@ -1,0 +1,18 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "slack-desktop-plugin",
+  "description": "Claude Code plugin for reading, searching and navigating the Slack desktop app on macOS.",
+  "owner": {
+    "name": "Matthew Herod",
+    "url": "https://github.com/mherod"
+  },
+  "plugins": [
+    {
+      "name": "slack-desktop",
+      "source": "./",
+      "description": "Read, search and navigate Slack desktop on macOS through the accessibility API, with a bundled Swift helper.",
+      "version": "0.1.0",
+      "category": "productivity"
+    }
+  ]
+}

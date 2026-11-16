@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "slack-desktop",
+  "version": "0.1.0",
+  "description": "Read, search and navigate Slack desktop on macOS through the accessibility API: list and switch workspaces, list channels and DMs, read messages, threads and existing transcripts, save attachments, and send, edit or delete your own messages. Uses a bundled Swift helper and works in the background by default.",
+  "author": {
+    "name": "Matthew Herod",
+    "url": "https://github.com/mherod"
+  },
+  "homepage": "https://github.com/mherod/slack-desktop-plugin",
+  "repository": "https://github.com/mherod/slack-desktop-plugin",
+  "license": "MIT",
+  "keywords": ["slack", "macos", "accessibility", "desktop", "automation", "swift"]
+}

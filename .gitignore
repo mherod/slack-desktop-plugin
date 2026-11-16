@@ -1,0 +1,10 @@
+.DS_Store
+node_modules/
+*.log
+
+# Local redaction tooling used to prepare the published copy; not part of the plugin.
+.redaction/
+
+# Never commit captured Slack output.
+*.receipt.json
+receipts/
