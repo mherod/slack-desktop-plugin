@@ -57,11 +57,12 @@ Message content stays on your machine and is returned only to the Claude session
 ## Development
 
 ```sh
-bun test skills/slack-desktop/scripts
+bun run test              # unit and native-harness tests
+bun run check:manifests   # plugin.json, marketplace.json and package.json versions agree
 claude plugin validate .
 ```
 
-Some native tests need the same accessibility permissions as the helper.
+Some native tests need the same accessibility permissions as the helper. CI runs the manifest check and the test suite on macOS for every push to `main` and every pull request. When you release, bump the version in all three manifests together.
 
 ## Limitations
 
