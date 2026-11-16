@@ -1,8 +1,8 @@
-# Slack Desktop plugin for Codex, ChatGPT and Claude Code
+# Slack Desktop
 
 [![CI](https://github.com/mherod/slack-desktop-plugin/actions/workflows/ci.yml/badge.svg)](https://github.com/mherod/slack-desktop-plugin/actions/workflows/ci.yml)
 
-A skill-based plugin for working with the **Slack desktop app on macOS** through the macOS accessibility API. It drives the app you are already signed in to, so it needs no Slack API token, bot or workspace admin approval.
+A plugin for **Codex / ChatGPT and Claude Code** that works with the **Slack desktop app on macOS** through the macOS accessibility API. It drives the app you are already signed in to, so it needs no Slack API token, bot or workspace admin approval. Both use the same skill and bundled helper.
 
 With this plugin, your assistant can:
 
@@ -56,9 +56,9 @@ The portable `plugin.json`, `.codex-plugin/plugin.json` compatibility manifest a
 /plugin install slack-desktop@slack-desktop-plugin
 ```
 
-Then ask your assistant something like *"What's new in #general on Slack?"* or *"Search Slack for the deploy checklist"*. The `slack-desktop` skill loads when it's relevant.
-
 ## Quickstart
+
+In either app, ask your assistant something like *"What's new in #general on Slack?"* or *"Search Slack for the deploy checklist"*. The `slack-desktop` skill loads when it's relevant.
 
 You don't need to run anything yourself: your assistant calls the helper for you. To try the helper directly from a clone:
 
@@ -105,7 +105,7 @@ bun $S read-channel 'general' --from='Alex Example'
 bun $S search 'deploy checklist' --pages=3 --format=json
 bun $S read-thread 'C012EXAMPLE:1700000000.000001'
 bun $S save-media 'F012EXAMPLE' --output="$HOME/Downloads/attachment.pdf"
-bun $S send '#general' --text='Hello from Claude'
+bun $S send '#general' --text='Hello from Slack Desktop'
 ```
 
 Every read prints references, such as `thread:REF` and `--before=REF` hints, that you can pass to the next command. [`SKILL.md`](skills/slack-desktop/SKILL.md) has the complete command guide and safety rules. [`references/output-format.md`](skills/slack-desktop/references/output-format.md) describes the output, pagination and limits.
@@ -150,7 +150,7 @@ The helper runs locally and returns captured Slack content to the assistant sess
 ```sh
 bun run test              # unit and native-harness tests
 bun run check:manifests   # manifest versions, catalog paths and bundled assets
-bun run validate          # claude plugin validate .
+bun run validate          # additional Claude Code packaging validation
 ```
 
 There are no dependencies to install. The tests drive the Swift helper against stubbed accessibility trees, so they need macOS and the Xcode Command Line Tools but not Slack or any permissions. CI runs the manifest check and the test suite on a hosted macOS runner for every push to `main` and every pull request.
