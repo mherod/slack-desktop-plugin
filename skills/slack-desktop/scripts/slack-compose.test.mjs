@@ -23,8 +23,12 @@ describe('send activation evidence', () => {
     expect(JSON.parse(formatOutput(compact, 'json', sent)).activation).toBe('focus+Return');
   });
   test('a pressed send stays quiet and unknown methods are dropped', () => {
-    expect(renderCompose(compactCompose({ ...sent, activation: 'AXPress' }, 'send', 'ploog'))).not.toContain('Return');
-    expect('activation' in compactCompose({ ...sent, activation: 'Return' }, 'send', 'ploog')).toBe(false);
+    expect(
+      renderCompose(compactCompose({ ...sent, activation: 'AXPress' }, 'send', 'ploog'))
+    ).not.toContain('Return');
+    expect('activation' in compactCompose({ ...sent, activation: 'Return' }, 'send', 'ploog')).toBe(
+      false
+    );
   });
 });
 

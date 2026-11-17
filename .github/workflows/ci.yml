@@ -27,5 +27,8 @@ jobs:
       - name: Check manifest versions agree
         run: bun scripts/check-manifests.mjs
 
+      - name: Check the skill matches its last export
+        run: bun scripts/check-export.mjs
+
       - name: Test
         run: bun run test

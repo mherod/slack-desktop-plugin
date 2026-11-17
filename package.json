@@ -8,6 +8,7 @@
   "scripts": {
     "test": "bun test skills/slack-desktop/scripts",
     "check:manifests": "bun scripts/check-manifests.mjs",
+    "check:export": "bun scripts/check-export.mjs",
     "validate": "claude plugin validate ."
   }
 }
