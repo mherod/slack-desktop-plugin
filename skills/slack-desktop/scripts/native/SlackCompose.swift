@@ -362,13 +362,43 @@ func readbackDivergence(_ observedValue: String?, _ text: String) -> [String: An
 
 // Clear only text this command placed, so a failed verification leaves the
 // composer as it was found (empty).
-func clearComposedText(_ editor: AXUIElement, _ workspace: Workspace) {
+func clearComposedText(
+  _ editor: AXUIElement, _ workspace: Workspace, afterSendPress: Bool = false
+) {
   _ = try? interactionAXValue(editor, kAXValueAttribute as CFString, "" as CFString)
   settle(0.3)
   recoverySteps.append(
-    composerIsBlank(editor)
-      ? "Cleared the unverified text this command entered; nothing was sent"
-      : "Attempted to clear unverified text; inspect the composer before another request")
+    !composerIsBlank(editor)
+      ? "Attempted to clear unverified text; inspect the composer before another request"
+      : afterSendPress
+        ? "Cleared this command's text, still unsent with no new message after Send now; read the conversation before any retry"
+        : "Cleared the unverified text this command entered; nothing was sent")
+}
+
+// Re-checked immediately before the Send now Return: the same editor and
+// button, the exact text still in place, nothing posted since the press, and
+// the same window with no modal. Any change withholds the key.
+struct SendFallbackEvidence: Equatable {
+  let sameEditor: Bool
+  let sameSend: Bool
+  let textReadsBack: Bool
+  let newRows: Int
+  let windowMatches: Bool
+  let noModal: Bool
+}
+func sendFallbackBlocker(_ evidence: SendFallbackEvidence) -> String? {
+  if !evidence.windowMatches { return "Slack window changed after Send now; Return withheld" }
+  if !evidence.noModal { return "A dialog or menu opened after Send now; Return withheld" }
+  if !evidence.sameEditor || !evidence.sameSend {
+    return "Composer or Send now changed after the press; Return withheld"
+  }
+  if evidence.newRows != 0 {
+    return "A new message appeared after Send now; Return withheld so nothing is sent twice"
+  }
+  if !evidence.textReadsBack {
+    return "Composer no longer holds exactly this text; Return withheld"
+  }
+  return nil
 }
 
 func sendMessage(_ text: String, _ target: [String: Any], _ workspace: Workspace) throws
@@ -412,6 +442,54 @@ func sendMessage(_ text: String, _ target: [String: Any], _ workspace: Workspace
     clearComposedText(surface.editor, workspace)
     throw error
   }
+  // A successful send empties the composer at once. Some Slack builds accept
+  // AXPress on Send now without acting on it, so after a short wait the exact
+  // Send now control gets one focus-plus-Return, never the editor.
+  func newRowCount(_ root: AXUIElement) throws -> Int {
+    try pageRows(root, target).filter { $0.timestamp > baseline }.count
+  }
+  func unsentTextRemains() -> Bool {
+    guard let root = try? workspace.root(), let fresh = try? messageComposer(root, target),
+      CFEqual(fresh.editor, surface.editor),
+      composerReadbackMatches(liveAttr(fresh.editor, kAXValueAttribute) as? String, text)
+    else { return false }
+    return (try? newRowCount(root)) == 0
+  }
+  func composerCleared() throws -> Bool {
+    composerIsBlank(try messageComposer(workspace.root(), target).editor)
+  }
+  var activation = ActivationMethod.press
+  let pressWait = Date().addingTimeInterval(2)
+  var cleared = false
+  repeat {
+    settle(0.2)
+    cleared = (try? composerCleared()) == true
+  } while !cleared && Date() < pressWait
+  if !cleared {
+    do {
+      activation = try focusReturnActivation(
+        surface.send, workspace, window: window, what: "Send now", opened: composerCleared,
+        beforeReturn: {
+          let root = try workspace.root()
+          let fresh = try messageComposer(root, target)
+          let evidence = SendFallbackEvidence(
+            sameEditor: CFEqual(fresh.editor, surface.editor),
+            sameSend: CFEqual(fresh.send, surface.send),
+            textReadsBack: composerReadbackMatches(
+              liveAttr(fresh.editor, kAXValueAttribute) as? String, text),
+            newRows: try newRowCount(root),
+            windowMatches: try windowId(workspace.window, workspace.pid) == window,
+            noModal: (try? requireNoModal(workspace.window)) != nil)
+          if let blocker = sendFallbackBlocker(evidence) { throw Failure(description: blocker) }
+        })
+    } catch {
+      if unsentTextRemains() { clearComposedText(surface.editor, workspace, afterSendPress: true) }
+      throw ComposeFailure(
+        description:
+          "Send now was pressed once without clearing the composer, and the Return fallback stopped: \(error). Read the conversation before any retry; do not resend blindly",
+        actionMayHaveOccurred: true)
+    }
+  }
   let expected = composeComparable(text)
   let deadline = Date().addingTimeInterval(12)
   var lastReason = "No new message with the sent text appeared"
@@ -434,6 +512,7 @@ func sendMessage(_ text: String, _ target: [String: Any], _ workspace: Workspace
           "status": "ok", "timestamp": matches[0].timestamp,
           "permalink": try messageRowPermalink(matches[0].element) as Any? ?? NSNull(),
           "newRows": rows.count, "composer": surface.description,
+          "activation": activation.rawValue,
         ]
       }
       lastReason =
@@ -443,9 +522,11 @@ func sendMessage(_ text: String, _ target: [String: Any], _ workspace: Workspace
       lastReason = String(describing: error)
     }
   } while Date() < deadline
+  // Text left behind after the deadline would be posted by any stray Return.
+  if unsentTextRemains() { clearComposedText(surface.editor, workspace, afterSendPress: true) }
   throw ComposeFailure(
     description:
-      "Send now was pressed once, but delivery was not verified: \(lastReason). Read the conversation before any retry; do not resend blindly",
+      "Send now was activated once (\(activation.rawValue)), but delivery was not verified: \(lastReason). Read the conversation before any retry; do not resend blindly",
     actionMayHaveOccurred: true)
 }
 

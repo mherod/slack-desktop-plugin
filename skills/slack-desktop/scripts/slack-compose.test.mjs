@@ -8,6 +8,26 @@ import {
 } from './slack-compose.mjs';
 import { formatOutput, parseCLI } from './slack-format.mjs';
 
+describe('send activation evidence', () => {
+  const sent = {
+    status: 'ok',
+    operation: 'send',
+    timestamp: '1700000000.000002',
+    permalink: 'https://team.slack.com/archives/D0DEMO/p1700000000000002',
+    composer: 'Message to ploog',
+  };
+  test('a focus+Return send is named in text and json', () => {
+    const compact = compactCompose({ ...sent, activation: 'focus+Return' }, 'send', 'ploog');
+    expect(compact.activation).toBe('focus+Return');
+    expect(renderCompose(compact)).toContain('activated once with focus and one Return');
+    expect(JSON.parse(formatOutput(compact, 'json', sent)).activation).toBe('focus+Return');
+  });
+  test('a pressed send stays quiet and unknown methods are dropped', () => {
+    expect(renderCompose(compactCompose({ ...sent, activation: 'AXPress' }, 'send', 'ploog'))).not.toContain('Return');
+    expect('activation' in compactCompose({ ...sent, activation: 'Return' }, 'send', 'ploog')).toBe(false);
+  });
+});
+
 describe('readback divergence evidence', () => {
   const readback = {
     observed: true,

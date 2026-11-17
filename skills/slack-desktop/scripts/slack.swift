@@ -626,6 +626,16 @@ func activate(
     } while Date() < until
     if try opened() { return .press }
   }
+  return try focusReturnActivation(
+    target, workspace, window: expected, what: what, inputDeadline: inputDeadline, opened: opened)
+}
+// The keyboard half of activation: focus the exact control and post one
+// Return only when it alone owns focus. `beforeReturn` lets a caller re-verify
+// its own state immediately before the key is posted.
+func focusReturnActivation(
+  _ target: AXUIElement, _ workspace: Workspace, window expected: Int, what: String,
+  inputDeadline: Date? = nil, opened: () throws -> Bool, beforeReturn: () throws -> Void = {}
+) throws -> ActivationMethod {
   try require(
     (attr(target, kAXEnabledAttribute) as? Bool) != false,
     "\(what) is disabled; input withheld")
@@ -667,6 +677,7 @@ func activate(
   }
   if let blocker = focusReturnBlocker(evidence) { throw Failure(description: blocker) }
   try requireNoModal(workspace.window)
+  try beforeReturn()
   try require(
     CGPreflightPostEventAccess(),
     "Post-event access unavailable in this execution context; input withheld. Run read-only permissions through the runner's approved execution context before considering macOS setup; do not replay input automatically"

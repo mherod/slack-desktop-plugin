@@ -143,6 +143,9 @@ export function compactCompose(receipt, operation, requested) {
     ...(operation === 'send' && typeof receipt.composer === 'string'
       ? { composer: receipt.composer }
       : {}),
+    ...(operation === 'send' && ['AXPress', 'focus+Return'].includes(receipt.activation)
+      ? { activation: receipt.activation }
+      : {}),
   };
 }
 
@@ -210,6 +213,8 @@ export function renderCompose(compact) {
   if (compact.operation === 'send') {
     const lines = [`Sent and verified${ref}.`];
     if (compact.composer) lines.push(`Composer: ${compact.composer}`);
+    if (compact.activation === 'focus+Return')
+      lines.push('Send now ignored AXPress; it was activated once with focus and one Return.');
     if (compact.permalink) lines.push(compact.permalink);
     if (compact.ref)
       lines.push(

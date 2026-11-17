@@ -82,6 +82,7 @@ const semanticKeys = new Set([
   'composer',
   'actionMayHaveOccurred',
   'readback',
+  'activation',
   'recovery',
   'textTranslation',
 ]);

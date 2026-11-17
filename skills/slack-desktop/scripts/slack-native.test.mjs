@@ -5372,6 +5372,11 @@ do {
   check(editableFocus("AXTextArea", ["ql-editor", "ql-blank"]) && editableFocus("AXComboBox", []) && editableFocus("AXTextField", []) && editableFocus("AXGroup", ["ql-editor"]), "composers, query boxes and text fields count as editable focus")
   check(!editableFocus("AXButton", ["c-button-unstyled", "p-top_nav__search"]) && !editableFocus("AXRow", ["p-channel_sidebar__static_list__item"]) && !editableFocus("AXRadioButton", ["p-tab_rail__button"]), "the Search button, sidebar rows and tab buttons are activation targets, not editors")
   check(ActivationMethod.press.rawValue == "AXPress" && ActivationMethod.focusReturn.rawValue == "focus+Return", "activation receipts name the method used")
+  let ready = SendFallbackEvidence(sameEditor: true, sameSend: true, textReadsBack: true, newRows: 0, windowMatches: true, noModal: true)
+  check(sendFallbackBlocker(ready) == nil, "an ignored Send now press may take one Return when nothing has changed")
+  check(sendFallbackBlocker(SendFallbackEvidence(sameEditor: true, sameSend: true, textReadsBack: true, newRows: 1, windowMatches: true, noModal: true))?.contains("sent twice") == true, "any new row after the press withholds Return so a late send is never repeated")
+  check(sendFallbackBlocker(SendFallbackEvidence(sameEditor: true, sameSend: true, textReadsBack: false, newRows: 0, windowMatches: true, noModal: true))?.contains("exactly this text") == true, "an emptied or edited composer withholds Return")
+  check([SendFallbackEvidence(sameEditor: false, sameSend: true, textReadsBack: true, newRows: 0, windowMatches: true, noModal: true), SendFallbackEvidence(sameEditor: true, sameSend: false, textReadsBack: true, newRows: 0, windowMatches: true, noModal: true), SendFallbackEvidence(sameEditor: true, sameSend: true, textReadsBack: true, newRows: 0, windowMatches: false, noModal: true), SendFallbackEvidence(sameEditor: true, sameSend: true, textReadsBack: true, newRows: 0, windowMatches: true, noModal: false)].allSatisfy { sendFallbackBlocker($0) != nil }, "a replaced editor or button, a changed window or a new dialog withholds Return")
 }
 try checkDMQueryClipboard()
 print("Passed \(count) native Slack guard checks")
@@ -5390,7 +5395,7 @@ print("Passed \(count) native Slack guard checks")
       const inputs = await writeNativeSnapshot(guards, directory);
       const binary = path.join(directory, 'checks');
       await run(nativeCompileCommand(guards, inputs, binary), guards.recipe.compileTimeout);
-      expect(await run([binary], 10000)).toBe('Passed 6308 native Slack guard checks\n');
+      expect(await run([binary], 10000)).toBe('Passed 6312 native Slack guard checks\n');
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
