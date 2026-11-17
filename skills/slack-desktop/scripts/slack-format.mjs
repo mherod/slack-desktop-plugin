@@ -691,7 +691,12 @@ function paginationLines(compact) {
   const older = pageCommand(compact, 'older'),
     newer = pageCommand(compact, 'newer');
   if (older) lines.push(`Older: ${older}`);
-  if (newer)
+  // A collection that started at the newest messages and paged older has nothing newer to offer.
+  const fromNewest =
+    ['read-channel', 'read-dm'].includes(compact.operation) &&
+    compact.pagination.cursor === null &&
+    batchState(compact)?.direction === 'older';
+  if (newer && !fromNewest)
     lines.push(`${compact.operation === 'read-thread' ? 'More replies' : 'Newer'}: ${newer}`);
   return lines;
 }
@@ -1134,7 +1139,7 @@ function coverageLines(compact, kind) {
         ? 'more matches may remain'
         : 'history may continue';
     const stopNotes = {
-      'page-limit': `Reached the requested ${batch.requestedPages}-page limit; ${remainder}.`,
+      'page-limit': `Reached the ${batch.requestedPages}-page limit; ${remainder}.`,
       'no-progress': `Stopped after a ${listing ? 'capture' : 'page'} exposed no additional ${listing ? (dmView ? 'rows in the DMs view' : 'sidebar rows') : kind === 'search' ? 'matches' : kind === 'thread' ? 'replies' : 'messages'}; ${remainder}.`,
       'no-next-page':
         'No further page was offered from the verified view; coverage remains partial.',
@@ -1701,6 +1706,97 @@ function renderMessage(message, isSearch = false, includeThreadHint = true, comp
   };
 }
 
+// Splits "Yesterday at 21:14:48" into its displayed day and time; other shapes stay whole.
+function displayedDayTime(message) {
+  const text = shortInline(message.displayedTime ?? message.displayedDay, 100);
+  const match = /^(.+) at (\d{1,2}:\d{2}(?::\d{2})?(?:\s?[AaPp][Mm])?)$/.exec(text);
+  return match ? { day: match[1], time: match[2] } : { day: null, time: text || 'Time not exposed' };
+}
+
+// A permalink in the read conversation becomes its bare TIMESTAMP; anything else stays whole.
+function conversationTimestamp(permalink, conversationId) {
+  const link = sourceLink(permalink);
+  const match =
+    link && /^https:\/\/[^/]+\/archives\/([CDG][A-Z0-9]+)\/p([0-9]{10})([0-9]{6})$/.exec(link);
+  return match && match[1] === conversationId ? `${match[2]}.${match[3]}` : null;
+}
+
+// Channel and DM reads print a transcript: one line per displayed day, consecutive messages from
+// one author under one heading, and each message's time and reference on its first line. A message
+// whose author was inferred from an earlier row in its group starts with "~" before its time; one
+// whose source is outside the group starts a new heading marked (inferred).
+function renderConversation(messages, compact) {
+  const conversationId = /^[CDG][A-Z0-9]+$/.test(compact.conversation?.id ?? '')
+    ? compact.conversation.id
+    : null;
+  const lines = [];
+  let shortened = 0,
+    richTrimmed = false,
+    day = null,
+    group = null,
+    timestamps = false,
+    marked = false;
+  for (const message of messages) {
+    const name = shortInline(displayName(message.author), 80);
+    const when = displayedDayTime(message);
+    const inferredHere =
+      message.authorInferred === true &&
+      group?.name === name &&
+      group.ids.has(message.authorSourceMessageId);
+    if (when.day && when.day !== day) {
+      if (lines.length) lines.push('');
+      lines.push(`── ${when.day} ──`);
+      day = when.day;
+      group = null;
+    }
+    if (!name || !group || group.name !== name || (message.authorInferred === true && !inferredHere)) {
+      if (lines.length && lines.at(-1) !== `── ${day} ──`) lines.push('');
+      lines.push(
+        name ? `${name}${message.authorInferred === true ? ' (inferred)' : ''}` : 'Author not exposed'
+      );
+      group = name ? { name, ids: new Set() } : null;
+    }
+    if (group && typeof message.id === 'string') group.ids.add(message.id);
+    const attachments = list(message.attachments);
+    const rawBody = plain(message.text ?? message.snippet).trim();
+    const body = shorten(
+      rawBody ||
+        (attachments.length
+          ? `[No text exposed; ${countLabel(attachments.length, 'attachment')} captured]`
+          : '[No text exposed]'),
+      500
+    );
+    if (body.shortened) shortened++;
+    const timestamp = conversationTimestamp(message.permalink, conversationId);
+    timestamps ||= timestamp !== null;
+    const source = timestamp ? null : sourceLink(message.permalink);
+    const indent = ' '.repeat(4 + when.time.length);
+    const [first, ...rest] = body.value.split('\n');
+    marked ||= inferredHere;
+    lines.push(
+      `${inferredHere ? ' ~' : '  '}${when.time}  ${first}${timestamp ? `  [${timestamp}]` : ''}`
+    );
+    for (const line of rest) lines.push(`${indent}${line}`);
+    const rich = renderRichContent(message, compact);
+    richTrimmed ||= rich.trimmed;
+    for (const line of rich.lines) lines.push(`${indent}${line}`);
+    if (source) lines.push(`${indent}${source}`);
+    const hint = threadHint(message.thread, compact);
+    if (hint) lines.push(`${indent}${hint}`);
+  }
+  const legend = [
+    timestamps && conversationId
+      ? `Each [TIMESTAMP] is a message reference: use ${conversationId}:TIMESTAMP with read-thread, edit or delete.`
+      : null,
+    marked
+      ? 'A ~ before the time marks a message whose author Slack did not show; it is inferred from an earlier message in the same group.'
+      : null,
+  ]
+    .filter(Boolean)
+    .join('\n');
+  return { block: lines.join('\n'), legend: legend || null, shortened, richTrimmed };
+}
+
 function renderMessageRows(compact, isSearch = false) {
   const messages = list(compact.messages);
   const paginated = !isSearch && compact.pagination?.supported === true;
@@ -1800,7 +1896,14 @@ function renderMessageRows(compact, isSearch = false) {
     blocks.push(
       `Showing first ${shown.length} of ${messages.length} collected matches; ${messages.length - shown.length} omitted from text.`
     );
-  for (const message of shown) {
+  if (!isSearch && shown.length) {
+    const transcript = renderConversation(shown, compact);
+    shortened = transcript.shortened;
+    richTrimmed = transcript.richTrimmed;
+    if (transcript.legend) blocks.push(transcript.legend);
+    blocks.push(transcript.block);
+  }
+  for (const message of isSearch ? shown : []) {
     const rendered = renderMessage(message, isSearch, true, compact);
     if (rendered.shortened) shortened++;
     richTrimmed ||= rendered.richTrimmed;

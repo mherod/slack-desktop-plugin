@@ -779,10 +779,95 @@ describe('trimmed plain text', () => {
     expect(output).toContain('Showing last 10 of 12 captured messages; 2 omitted.');
     expect(output).not.toContain('Message body 1.');
     expect(output).not.toContain('Message body 2.');
-    expect(output).toContain('Person 3 · 10:03');
+    expect(output).toContain('Person 3\n  10:03  Message body 3.');
     expect(output).toContain('Message body 12.');
     expect(output).toContain('https://demo.slack.com/archives/CDEMO/p12');
     expect(output).toContain('older messages and thread replies may be outside this view');
+  });
+
+  test('prints conversations as a transcript grouped by day and author with short references', () => {
+    const at = (index, day, time, author, extra = {}) => ({
+      ...message(index),
+      id: `message-list_1700000000.00000${index}`,
+      author,
+      displayedTime: `${day} at ${time}`,
+      permalink: `https://demo.slack.com/archives/CDEMO1/p170000000000000${index}`,
+      ...extra,
+    });
+    const compact = {
+      ...base(),
+      conversation: { name: 'project-help', kind: 'channel', id: 'CDEMO1' },
+      messages: [
+        at(1, 'Yesterday', '21:14:48', 'Alex Example'),
+        at(2, 'Yesterday', '21:15:03', 'Alex Example', {
+          authorInferred: true,
+          authorSourceMessageId: 'message-list_1700000000.000001',
+        }),
+        at(3, 'Yesterday', '21:16:00', 'Sam Example'),
+        at(4, 'Today', '09:00:00', 'Sam Example'),
+        at(5, 'Today', '09:01:00', 'Sam Example', {
+          authorInferred: true,
+          authorSourceMessageId: 'message-list_1699999999.000000',
+        }),
+      ],
+      pagination: {
+        supported: true,
+        cursor: null,
+        status: 'advanced',
+        hasMore: null,
+        older: {
+          cursor: 'CDEMO1:1700000000.000001',
+          navigation: { command: 'read-channel', args: ['project-help', '--before=CDEMO1:1700000000.000001'] },
+        },
+        newer: {
+          cursor: 'CDEMO1:1700000000.000003',
+          navigation: { command: 'read-channel', args: ['project-help', '--after=CDEMO1:1700000000.000003'] },
+        },
+        batch: {
+          attemptedPages: 1,
+          completedPages: 1,
+          direction: 'older',
+          requestedPages: 3,
+          stopReason: 'no-progress',
+          deduplicatedCount: 0,
+        },
+      },
+    };
+    const output = formatOutput(compact);
+    expect(output).toContain(
+      'Each [TIMESTAMP] is a message reference: use CDEMO1:TIMESTAMP with read-thread, edit or delete.'
+    );
+    expect(output).toContain(
+      [
+        '── Yesterday ──',
+        'Alex Example',
+        '  21:14:48  Message body 1.  [1700000000.000001]',
+        ' ~21:15:03  Message body 2.  [1700000000.000002]',
+        '',
+        'Sam Example',
+        '  21:16:00  Message body 3.  [1700000000.000003]',
+        '',
+        '── Today ──',
+        'Sam Example',
+        '  09:00:00  Message body 4.  [1700000000.000004]',
+        '',
+        'Sam Example (inferred)',
+        '  09:01:00  Message body 5.  [1700000000.000005]',
+      ].join('\n')
+    );
+    // An author inferred from the group's own first row keeps a ~ marker instead of a new heading.
+    expect(output).not.toContain('Alex Example (inferred)');
+    expect(output).toContain(
+      'A ~ before the time marks a message whose author Slack did not show; it is inferred from an earlier message in the same group.'
+    );
+    expect(output).not.toContain('https://demo.slack.com');
+    expect(output).toContain('Older: read-channel project-help --before=CDEMO1:1700000000.000001');
+    // The read started at the newest messages, so a Newer hint would only revisit them.
+    expect(output).not.toContain('Newer:');
+    compact.pagination.cursor = 'CDEMO1:1700000000.000009';
+    expect(formatOutput(compact)).toContain('Newer: read-channel project-help --after=');
+    const json = JSON.parse(formatOutput(compact, 'json'));
+    expect(json.messages[0].permalink).toBe('https://demo.slack.com/archives/CDEMO1/p1700000000000001');
   });
 
   test('shows the first ten search snippets including inspect of a search page', () => {
@@ -811,8 +896,8 @@ describe('trimmed plain text', () => {
     const output = formatOutput(compact);
     const body = output
       .split('\n')
-      .find((line) => line.startsWith('  🙂'))
-      .slice(2);
+      .find((line) => line.startsWith('  10:01  🙂'))
+      .slice('  10:01  '.length);
     expect(Array.from(body)).toHaveLength(500);
     expect(body.endsWith('…')).toBe(true);
     expect(body).not.toContain('\ufffd');
@@ -849,7 +934,7 @@ describe('trimmed plain text', () => {
       ],
     };
     const output = formatOutput(compact);
-    expect(output).toContain('Author not exposed · Time not exposed');
+    expect(output).toContain('Author not exposed\n  Time not exposed  [No text exposed');
     expect(output).toContain('No text exposed; 1 attachment captured');
     const empty = formatOutput({
       operation: 'search',
@@ -1955,7 +2040,7 @@ describe('multi-page options and text', () => {
     compact.messages[1].authorSourceMessageId = compact.messages[0].id;
     const output = formatOutput(compact);
     expect(output).toContain('24 messages across 3 pages.');
-    expect(output).toContain('Reached the requested 3-page limit; history may continue.');
+    expect(output).toContain('Reached the 3-page limit; history may continue.');
     expect(output).toContain(`Older: read-channel project-help --before=${cursor}`);
     expect(output).not.toContain('omitted');
     expect(output).not.toContain('on this page');
@@ -2255,10 +2340,12 @@ describe('destination candidates and author inference', () => {
         messages: [{ ...message(1), author: 'Alex Example', authorInferred: true }],
       };
       if (operation === 'search') compact.search = { query: 'example' };
-      expect(formatOutput(compact)).toContain('Alex Example (inferred) ·');
+      // Conversation reads put the author on its own heading line; search keeps "author · time".
+      const after = operation === 'search' ? ' ·' : '\n';
+      expect(formatOutput(compact)).toContain(`Alex Example (inferred)${after}`);
       expect(JSON.parse(formatOutput(compact, 'json')).messages[0].authorInferred).toBe(true);
       compact.messages[0].authorInferred = false;
-      expect(formatOutput(compact)).toContain('Alex Example ·');
+      expect(formatOutput(compact)).toContain(`Alex Example${after}`);
       expect(formatOutput(compact)).not.toContain('(inferred)');
     }
     const thread = threadResult(1);
@@ -2273,10 +2360,10 @@ describe('destination candidates and author inference', () => {
       ...base(),
       messages: [{ ...message(1), author: null, authorInferred: true }],
     };
-    expect(formatOutput(compact)).toContain('Author not exposed ·');
+    expect(formatOutput(compact)).toContain('Author not exposed\n');
     expect(formatOutput(compact)).not.toContain('(inferred)');
     compact.messages[0].author = { displayName: '\x1b[31mAlex\x1b[0m\u202e' };
-    expect(formatOutput(compact)).toContain('Alex (inferred) ·');
+    expect(formatOutput(compact)).toContain('Alex (inferred)\n');
     expect(formatOutput(compact)).not.toContain('\x1b');
   });
 });
@@ -2324,7 +2411,7 @@ describe('multi-page search output', () => {
     expect(output).toContain(
       'Use --format=json for all collected matches and their full captured text.'
     );
-    expect(output).toContain('Reached the requested 3-page limit; more matches may remain.');
+    expect(output).toContain('Reached the 3-page limit; more matches may remain.');
     expect(output).toContain('2 repeated matches omitted.');
     expect(output).not.toContain('history may continue');
     expect(output).not.toContain('viewport');
@@ -2556,7 +2643,7 @@ describe('multi-page channel output', () => {
     expect(output.split('\n').filter((line) => line.startsWith('#'))).toHaveLength(30);
     expect(output).toContain('Showing 30 of 70 collected channels; 40 omitted from text.');
     expect(output).toContain('Use --format=json for all collected channels.');
-    expect(output).toContain('Reached the requested 3-page limit; other channels may remain.');
+    expect(output).toContain('Reached the 3-page limit; other channels may remain.');
     expect(output).toContain('5 repeated channel observations omitted.');
     expect(output).toContain('other channels may be outside these captures');
     expect(output).not.toContain('history');
@@ -2855,7 +2942,7 @@ describe('DM sidebar output', () => {
         expect(output).toContain('65 unique DM conversations across 3 sidebar captures.');
         expect(output).toContain('4 repeated DM observations omitted.');
         expect(output).toContain(
-          'Reached the requested 3-page limit; other DM conversations may remain.'
+          'Reached the 3-page limit; other DM conversations may remain.'
         );
       }
       const json = JSON.parse(formatOutput(compact, 'json'));
@@ -3834,7 +3921,7 @@ describe('rich-media output', () => {
       },
     ];
     const output = formatOutput(compact);
-    const imageLine = output.split('\n').find((line) => line.startsWith('  Image · '));
+    const imageLine = output.split('\n').find((line) => line.trimStart().startsWith('Image · '));
     expect(imageLine).toContain(`${'🙂'.repeat(119)}…`);
     expect(imageLine).toContain(`${'🦊'.repeat(139)}…`);
     expect(output).toContain(`${'d'.repeat(39)}…`);
