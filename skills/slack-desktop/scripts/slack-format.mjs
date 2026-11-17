@@ -419,6 +419,8 @@ export function parseCLI(argv) {
       // One page rarely holds a given author's messages; scan several by default.
       pages ??= 5;
     }
+    // One page of ten messages is too little context; channel reads collect thirty by default.
+    if (args[0] === 'read-channel' && args.length === 2) pages ??= 3;
     if (
       [
         'channels',

@@ -1611,6 +1611,7 @@ describe('pagination options and text', () => {
           interaction: 'background',
           format: 'json',
           page: { direction, cursor },
+          ...(operation === 'read-channel' ? { pages: 3 } : {}),
         });
       }
     }
@@ -1619,6 +1620,7 @@ describe('pagination options and text', () => {
       interaction: 'background',
       format: 'text',
       page: { direction: 'older', cursor },
+      pages: 3,
     });
     expect(parseCLI(['search', '--', `--before=${cursor}`])).toEqual({
       args: ['search', `--before=${cursor}`],
@@ -1894,7 +1896,13 @@ describe('multi-page options and text', () => {
       interaction: 'background',
       format: 'text',
     });
-    expect(parseCLI(['read-channel', 'project-help'])).not.toHaveProperty('pages');
+    // Channel reads default to three pages (thirty messages); an explicit count still wins.
+    expect(parseCLI(['read-channel', 'project-help']).pages).toBe(3);
+    expect(parseCLI(['read-channel', 'project-help', '--pages=1']).pages).toBe(1);
+    expect(parseCLI(['read-channel', 'project-help', '--from=alex']).pages).toBe(5);
+    expect(parseCLI(['read-channel', 'project-help', '--since=2026-01-31']).pages).toBe(10);
+    expect(parseCLI(['read-dm', '@alex'])).not.toHaveProperty('pages');
+    expect(parseCLI(['read-thread', 'CDEMO:1700000000.000001'])).not.toHaveProperty('pages');
   });
 
   test('rejects invalid, repeated and unsupported page counts before input with the chosen format', () => {
