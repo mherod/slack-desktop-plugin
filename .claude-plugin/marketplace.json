@@ -11,7 +11,7 @@
       "name": "slack-desktop",
       "source": "./",
       "description": "Read, search and navigate Slack desktop on macOS through the accessibility API, with a bundled Swift helper.",
-      "version": "0.1.10",
+      "version": "0.1.11",
       "category": "productivity"
     }
   ]

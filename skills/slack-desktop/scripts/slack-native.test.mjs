@@ -4156,9 +4156,9 @@ for marker in ["c-search_autocomplete__suggestion_item--query","c-search_autocom
 }
 check(pickerDMName(" Leading , direct message") == " Leading ", "significant name whitespace is preserved, never normalized")
 check(!dmSuggestionMatches(nil,["@alex"],"@alex"), "a handle cannot authorize a non-person row")
-check(dmSuggestionMatches(pickerDMName("ploog (agent), Direct Message"),[],"ploog") && dmSuggestionMatches(pickerDMName("ploog (agent), direct message"),[],"ploog (agent)") && dmDestinationName("ploog (agent)") == "ploog" && dmDestinationName("Alex") == "Alex", "an agent DM labelled NAME (agent) matches NAME and navigates by the NAME title")
-check(!dmSuggestionMatches("ploog (agent)",[],"plo") && !dmSuggestionMatches("ploog (bot)",[],"ploog") && !dmSuggestionMatches("ploog (Agent)",[],"ploog") && !dmSuggestionMatches("ploog  (agent)",[],"ploog") && !dmSuggestionMatches("Alex (agent) (agent)",[],"Alex"), "only the exact observed agent label is accepted, never another parenthesized suffix")
-check(dmDestinationName(" (agent)") == " (agent)" && dmDestinationName("ploog (agent) ") == "ploog (agent) ", "a bare or padded agent label is never stripped to an empty or altered name")
+check(dmSuggestionMatches(pickerDMName("helperbot (agent), Direct Message"),[],"helperbot") && dmSuggestionMatches(pickerDMName("helperbot (agent), direct message"),[],"helperbot (agent)") && dmDestinationName("helperbot (agent)") == "helperbot" && dmDestinationName("Alex") == "Alex", "an agent DM labelled NAME (agent) matches NAME and navigates by the NAME title")
+check(!dmSuggestionMatches("helperbot (agent)",[],"helper") && !dmSuggestionMatches("helperbot (bot)",[],"helperbot") && !dmSuggestionMatches("helperbot (Agent)",[],"helperbot") && !dmSuggestionMatches("helperbot  (agent)",[],"helperbot") && !dmSuggestionMatches("Alex (agent) (agent)",[],"Alex"), "only the exact observed agent label is accepted, never another parenthesized suffix")
+check(dmDestinationName(" (agent)") == " (agent)" && dmDestinationName("helperbot (agent) ") == "helperbot (agent) ", "a bare or padded agent label is never stripped to an empty or altered name")
 
 // The group history marker is UI metadata only in the exact observed layouts.
 let directForewordClasses = ["c-button-unstyled","p-message_pane__foreword__avatar","c-avatar","c-avatar--interactive"]

@@ -775,8 +775,9 @@ const isMetadata = (node) =>
   node.classes.some((name) =>
     /^(?:p-composer|p-message_input|p-workspace__input|c-message_actions)/.test(name)
   );
-// Search highlighting splits one paragraph into adjacent static-text runs ("From ", "BlackSmith",
-// " ^"). A run whose every word starts with, or begins, a term of the observed query is a highlight.
+// Search highlighting splits one paragraph into adjacent static-text runs ("Sending the ",
+// "release", " notes"). A run whose every word starts with, or begins, a term of the observed
+// query is a highlight.
 export function searchHighlight(query) {
   const terms = String(query ?? '')
     .split(/\s+/)
