@@ -11134,6 +11134,9 @@ func dmHubContent(_ workspace: Workspace, _ expected: ListingPage, deadline: Dat
     })
 }
 
+let nativeUsage =
+  "Usage: inspect | workspaces | current-workspace | switch-workspace TARGET | channels | dms | read-channel NAME | read-dm NAME_OR_@HANDLE_OR_GROUP:ID | read-thread REF_OR_PERMALINK | read-media REF | read-transcript REF | save-media REF | search QUERY | channel NAME | send #CHANNEL|NAME|@HANDLE|group:ID|thread:REF --text=TEXT [--allow-clipboard] | edit REF --text=TEXT | delete REF --confirm-delete | permissions [--request]"
+
 // MARK: - Command entry point
 do {
   let (requestedWorkspace, scopedArguments) = try workspaceArguments(
@@ -11151,38 +11154,16 @@ do {
     arguments.first == "inspect" && arguments.count > 1
     ? try UIOptions(Array(arguments.dropFirst())) : nil
   if uiOptions != nil { arguments = ["inspect"] }
-  // Composition flags are peeled off before generic validation; only send,
-  // edit and delete accept them.
-  var composeText: String?
-  var confirmDelete = false
-  if ["send", "edit", "delete"].contains(arguments.first ?? "") {
-    var remaining: [String] = []
-    for argument in arguments {
-      if argument.hasPrefix("--text=") {
-        try require(composeText == nil, "Specify --text once")
-        composeText = String(argument.dropFirst("--text=".count))
-      } else if argument == "--confirm-delete" {
-        try require(!confirmDelete, "Specify --confirm-delete once")
-        confirmDelete = true
-      } else {
-        remaining.append(argument)
-      }
-    }
-    arguments = remaining
-    try require(
-      (arguments[0] == "delete") == (composeText == nil),
-      "send and edit require --text=TEXT; delete accepts no text")
-    try require(
-      (arguments[0] == "delete") == confirmDelete,
-      "delete requires --confirm-delete; only delete accepts it")
-  }
+  let composition = try composeArguments(arguments)
+  arguments = composition.arguments
+  let composeText = composition.text
   var page: PageRequest?
   var requestedPages = 1
   var pagesSeen = false
   var membersSeconds: String?
   var sinceEpoch: Double?
   var dmSearch: String?
-  var allowClipboard = false
+  var allowClipboard = composition.allowClipboard
   let positionalCount =
     ["channels", "dms", "browse-channels", "browse-people"].contains(arguments.first ?? "")
     ? 1 : 2
@@ -11247,7 +11228,7 @@ do {
       "workspaces | current-workspace | switch-workspace TARGET: list observed signed-in workspace domains, inspect the current client context, or switch once to an exact observed name/domain. No pagination or clipboard flags. Only switch-workspace accepts explicit foreground mode; background remains default."
     )
     print(
-      "slack.swift inspect [--ui [--filter=TEXT] [--limit=1..500] [--depth=0..40] [--prepare]] | channels | dms [--search=TEXT --allow-clipboard] | read-channel NAME | read-dm NAME_OR_@HANDLE_OR_GROUP:ID_OR_GROUP-NAME:NAME [--allow-clipboard] | read-thread REF_OR_PERMALINK | read-media REF | read-transcript REF | save-media REF | search QUERY | channel NAME | permissions [--request]\nchannels lists exposed sidebar channels; dms lists the current DMs view and preserves its filters; read commands return currently loaded messages, not full history. Duplicate DM names require an exact @handle; group DMs use the group:ID reference emitted by dms. Channels, dms, conversation/thread reads, search and read-transcript accept --pages=1..10; transcript paging uses only scoped AXScrollToVisible and never presses timestamp/text buttons; read-media inspects currently exposed attachment metadata without input and accepts no paging flags; only conversation/thread reads accept --before=REF or --after=REF.\npermissions checks process trust and bounded real Slack AX role/children reads without input, scoped to the current execution context. Verify approved host execution before treating denied access as missing macOS setup. ready also requires post-event access; readable AX without it is inspection-only (exit 0). Missing trust or AX API disabled exits 3; missing/ambiguous Slack or other failed AX probes report unavailable and exit 1. --request explicitly requests the permission prompt/settings for missing trust or an API-disabled probe; it never grants access or resumes a command.\nsave-media requests one verified Download control after wrapper authorization and monitors background state until wrapper completion; it never opens the saved file.\nBackground is the default and never activates or raises windows, moves the cursor or opens settings. Prefix --interaction=foreground explicitly activates the pinned running Slack app once for a navigation/read/search/save command, then keeps the same source-verified AX and window/PID-targeted input. It leaves current focus unchanged afterward and stops on an observed app switch; no command is replayed automatically. inspect, read-media and permissions do not accept foreground interaction. Keys are window/PID-targeted after verifying the exact control. Direct DMs autocomplete search uses guarded temporary clipboard contents and Shift+Insert only with --allow-clipboard; --search= clears the query without clipboard use. Output is private live UI content."
+      "slack.swift inspect [--ui [--filter=TEXT] [--limit=1..500] [--depth=0..40] [--prepare]] | channels | dms [--search=TEXT --allow-clipboard] | read-channel NAME | read-dm NAME_OR_@HANDLE_OR_GROUP:ID_OR_GROUP-NAME:NAME [--allow-clipboard] | read-thread REF_OR_PERMALINK | read-media REF | read-transcript REF | save-media REF | search QUERY | channel NAME | send #CHANNEL|NAME|@HANDLE|group:ID|thread:REF --text=TEXT [--allow-clipboard] | edit REF --text=TEXT | delete REF --confirm-delete | permissions [--request]\nchannels lists exposed sidebar channels; dms lists the current DMs view and preserves its filters; read commands return currently loaded messages, not full history. Duplicate DM names require an exact @handle; group DMs use the group:ID reference emitted by dms. Channels, dms, conversation/thread reads, search and read-transcript accept --pages=1..10; transcript paging uses only scoped AXScrollToVisible and never presses timestamp/text buttons; read-media inspects currently exposed attachment metadata without input and accepts no paging flags; only conversation/thread reads accept --before=REF or --after=REF.\npermissions checks process trust and bounded real Slack AX role/children reads without input, scoped to the current execution context. Verify approved host execution before treating denied access as missing macOS setup. ready also requires post-event access; readable AX without it is inspection-only (exit 0). Missing trust or AX API disabled exits 3; missing/ambiguous Slack or other failed AX probes report unavailable and exit 1. --request explicitly requests the permission prompt/settings for missing trust or an API-disabled probe; it never grants access or resumes a command.\nsave-media requests one verified Download control after wrapper authorization and monitors background state until wrapper completion; it never opens the saved file.\nBackground is the default and never activates or raises windows, moves the cursor or opens settings. Prefix --interaction=foreground explicitly activates the pinned running Slack app once for a navigation/read/search/save command, then keeps the same source-verified AX and window/PID-targeted input. It leaves current focus unchanged afterward and stops on an observed app switch; no command is replayed automatically. inspect, read-media and permissions do not accept foreground interaction. Keys are window/PID-targeted after verifying the exact control. Direct DMs autocomplete search uses guarded temporary clipboard contents and Shift+Insert only with --allow-clipboard; --search= clears the query without clipboard use. Output is private live UI content."
     )
     exit(0)
   }
@@ -11266,7 +11247,7 @@ do {
           "delete",
         ].contains(
           arguments[0])),
-    "Usage: inspect | workspaces | current-workspace | switch-workspace TARGET | channels | dms | read-channel NAME | read-dm NAME_OR_@HANDLE_OR_GROUP:ID | read-thread REF_OR_PERMALINK | read-media REF | read-transcript REF | save-media REF | search QUERY | channel NAME | permissions [--request]"
+    nativeUsage
   )
   let requestedThread = arguments[0] == "read-thread" ? try MessageLink(arguments[1]) : nil
   if ["read-media", "read-transcript", "save-media"].contains(arguments[0]) {
@@ -11941,6 +11922,10 @@ do {
     exitCode = access.probe.exitCode
   }
   if let observation = afterErrorObservation() { failure["observation"] = observation }
+  if let readback = error as? ReadbackFailure {
+    failure["actionMayHaveOccurred"] = false
+    failure["readback"] = readback.readback
+  }
   if let compose = error as? ComposeFailure {
     failure["actionMayHaveOccurred"] = compose.actionMayHaveOccurred
     failure["next"] =

@@ -15,6 +15,51 @@ struct ComposeFailure: Error, CustomStringConvertible {
   let actionMayHaveOccurred: Bool
 }
 
+// Composition flags are peeled off before generic validation. Only send, edit
+// and delete accept --text or --confirm-delete, and only send accepts
+// --allow-clipboard; its destination rule is checked with the other clipboard
+// rules once the positional arguments are known.
+struct ComposeArguments: Equatable {
+  let arguments: [String]
+  let text: String?
+  let confirmDelete: Bool
+  let allowClipboard: Bool
+}
+func composeArguments(_ input: [String]) throws -> ComposeArguments {
+  guard let operation = input.first, ["send", "edit", "delete"].contains(operation) else {
+    return ComposeArguments(
+      arguments: input, text: nil, confirmDelete: false, allowClipboard: false)
+  }
+  var remaining: [String] = []
+  var text: String?
+  var confirmDelete = false
+  var allowClipboard = false
+  for argument in input {
+    if argument.hasPrefix("--text=") {
+      try require(text == nil, "Specify --text once")
+      text = String(argument.dropFirst("--text=".count))
+    } else if argument == "--confirm-delete" {
+      try require(!confirmDelete, "Specify --confirm-delete once")
+      confirmDelete = true
+    } else if argument == "--allow-clipboard" {
+      try require(
+        operation == "send", "Only send accepts --allow-clipboard; edit and delete do not")
+      try require(!allowClipboard, "Specify --allow-clipboard only once")
+      allowClipboard = true
+    } else {
+      remaining.append(argument)
+    }
+  }
+  try require(
+    (operation == "delete") == (text == nil),
+    "send and edit require --text=TEXT; delete accepts no text")
+  try require(
+    (operation == "delete") == confirmDelete,
+    "delete requires --confirm-delete; only delete accepts it")
+  return ComposeArguments(
+    arguments: remaining, text: text, confirmDelete: confirmDelete, allowClipboard: allowClipboard)
+}
+
 // Text as Slack's editor reports it: Quill keeps a trailing newline.
 func composerText(_ value: String?) -> String? {
   guard var value else { return nil }
@@ -228,13 +273,86 @@ func setComposerValue(
   try require(result == .success, "Editor did not accept text; nothing was sent")
 }
 
-func waitForComposerText(_ editor: AXUIElement, _ text: String) -> Bool {
+// Returns nil once the text reads back, otherwise the last value observed so a
+// mismatch can be described before the text is cleared.
+func waitForComposerText(_ editor: AXUIElement, _ text: String) -> String?? {
   let deadline = Date().addingTimeInterval(2)
+  var last: String?
   repeat {
     settle(0.2)
-    if composerReadbackMatches(liveAttr(editor, kAXValueAttribute) as? String, text) { return true }
+    last = liveAttr(editor, kAXValueAttribute) as? String
+    if composerReadbackMatches(last, text) { return nil }
   } while Date() < deadline
-  return false
+  return .some(last)
+}
+
+// A readback mismatch stops before any Send now or Save press, so nothing was
+// sent or saved. The evidence describes where the text diverged without any
+// message content.
+struct ReadbackFailure: Error, CustomStringConvertible {
+  let description: String
+  let readback: [String: Any]
+}
+
+// Letters and digits are reported only as a kind. Punctuation, symbols and
+// whitespace keep their codepoint so typographic or link rewriting is visible.
+func readbackKind(_ scalar: Unicode.Scalar) -> String {
+  if CharacterSet.letters.contains(scalar) { return "letter" }
+  if CharacterSet.decimalDigits.contains(scalar) { return "digit" }
+  return String(format: "U+%04X", scalar.value)
+}
+
+func foldTypography(_ value: String) -> String {
+  var folded = ""
+  for scalar in value.unicodeScalars {
+    switch scalar.value {
+    case 0x2018, 0x2019, 0x201A, 0x201B, 0x2032: folded.append("'")
+    case 0x201C, 0x201D, 0x201E, 0x201F, 0x2033: folded.append("\"")
+    default: folded.unicodeScalars.append(scalar)
+    }
+  }
+  return folded
+}
+
+func readbackDivergence(_ observedValue: String?, _ text: String) -> [String: Any] {
+  let shortcodes = #":[a-z0-9_+\-']+:"#
+  let withoutShortcodes = text.replacingOccurrences(
+    of: shortcodes, with: "", options: [.regularExpression, .caseInsensitive])
+  guard let observed = composerText(observedValue) else {
+    return ["observed": false, "expectedLength": text.unicodeScalars.count]
+  }
+  let actual = Array(observed.unicodeScalars)
+  func commonPrefix(_ expected: [Unicode.Scalar]) -> Int {
+    var offset = 0
+    while offset < min(expected.count, actual.count) && expected[offset] == actual[offset] {
+      offset += 1
+    }
+    return offset
+  }
+  // Slack may drop known shortcodes, so compare with whichever form matches longer.
+  let full = Array(text.unicodeScalars)
+  let stripped = Array(withoutShortcodes.unicodeScalars)
+  let useStripped = stripped != full && commonPrefix(stripped) > commonPrefix(full)
+  let expected = useStripped ? stripped : full
+  let offset = commonPrefix(expected)
+  let start = max(0, offset - 3)
+  func around(_ scalars: [Unicode.Scalar]) -> [String] {
+    start < scalars.count ? scalars[start..<min(scalars.count, offset + 4)].map(readbackKind) : []
+  }
+  func squash(_ value: String) -> String {
+    value.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+      .joined(separator: " ")
+  }
+  let reference = useStripped ? withoutShortcodes : text
+  return [
+    "observed": true, "expectedLength": expected.count, "observedLength": actual.count,
+    "firstDifference": offset, "windowStart": start,
+    "expectedAround": around(expected), "observedAround": around(actual),
+    "comparedWithoutShortcodes": useStripped,
+    "equalAfterQuoteFolding": foldTypography(observed) == foldTypography(reference),
+    "equalIgnoringWhitespace": squash(observed) == squash(reference),
+    "observedIsPrefix": actual.count < expected.count && offset == actual.count,
+  ]
 }
 
 // Clear only text this command placed, so a failed verification leaves the
@@ -266,9 +384,11 @@ func sendMessage(_ text: String, _ target: [String: Any], _ workspace: Workspace
       CFEqual(fresh.editor, surface.editor) && composerIsBlank(fresh.editor),
       "Composer changed before typing; nothing was typed")
   }
-  guard waitForComposerText(surface.editor, text) else {
+  if let observed = waitForComposerText(surface.editor, text) {
+    let readback = readbackDivergence(observed, text)
     clearComposedText(surface.editor, workspace)
-    throw Failure(description: "Composer text did not read back exactly; nothing was sent")
+    throw ReadbackFailure(
+      description: "Composer text did not read back exactly; nothing was sent", readback: readback)
   }
   let window = try windowId(workspace.window, workspace.pid)
   try sampleDesktop("before-send")
@@ -514,8 +634,10 @@ func editMessage(
         CFEqual(fresh.editor, editor.editor)
       else { throw Failure(description: "Inline editor changed; nothing was saved") }
     }
-    guard waitForComposerText(editor.editor, text) else {
-      throw Failure(description: "Edited text did not read back exactly; nothing was saved")
+    if let observed = waitForComposerText(editor.editor, text) {
+      throw ReadbackFailure(
+        description: "Edited text did not read back exactly; nothing was saved",
+        readback: readbackDivergence(observed, text))
     }
     let window = try windowId(workspace.window, workspace.pid)
     try sampleDesktop("before-save-edit")

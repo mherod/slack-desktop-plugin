@@ -5309,6 +5309,36 @@ do {
   let failure=cleanup["failure"] as? [String:Any]
   check(cleanup["closeAttempted"] as? Bool == false && failure?["capturedAt"] as? Int64 == 200 && failure?["sourceVerifiedAtCaptureStart"] as? Bool == true && original.diagnostic["capturedAt"] as? Int64 == 100 && original.diagnostic["sourceVerifiedAtCaptureStart"] as? Bool == false,"later cleanup evidence never overwrites the original failed source proof or its timestamp")
 }
+// Composition arguments: --allow-clipboard reaches send in any position; edit and delete reject it.
+do {
+  func composeRejected(_ input: [String], _ fragment: String) -> Bool {
+    do { _ = try composeArguments(input); return false } catch { return String(describing: error).contains(fragment) }
+  }
+  let before = try composeArguments(["send", "Alex Example", "--allow-clipboard", "--text=hi"])
+  let after = try composeArguments(["send", "@alex", "--text=hi", "--allow-clipboard"])
+  check(before == ComposeArguments(arguments: ["send", "Alex Example"], text: "hi", confirmDelete: false, allowClipboard: true) && after.arguments == ["send", "@alex"] && after.allowClipboard, "send peels --allow-clipboard before or after --text, leaving exactly two positional arguments")
+  check(try composeArguments(["send", "#general", "--text=hi"]) == ComposeArguments(arguments: ["send", "#general"], text: "hi", confirmDelete: false, allowClipboard: false), "send without the flag keeps clipboard use off")
+  check(composeRejected(["send", "@alex", "--allow-clipboard", "--allow-clipboard", "--text=hi"], "only once") && composeRejected(["edit", "CDEMO:1700000000.000001", "--text=hi", "--allow-clipboard"], "Only send accepts --allow-clipboard") && composeRejected(["delete", "CDEMO:1700000000.000001", "--confirm-delete", "--allow-clipboard"], "Only send accepts --allow-clipboard"), "a repeated flag, or the flag on edit or delete, stops with a specific message instead of the usage text")
+  check(composeRejected(["send", "@alex"], "require --text") && composeRejected(["delete", "CDEMO:1700000000.000001"], "requires --confirm-delete") && composeRejected(["send", "@alex", "--text=a", "--text=b"], "--text once"), "send and edit still require one --text and delete still requires --confirm-delete")
+  check(try composeArguments(["read-dm", "Alex", "--allow-clipboard"]).arguments == ["read-dm", "Alex", "--allow-clipboard"], "other commands keep their flags for the generic flag loop")
+  check(["send #CHANNEL|NAME|@HANDLE|group:ID|thread:REF --text=TEXT [--allow-clipboard]", "edit REF --text=TEXT", "delete REF --confirm-delete"].allSatisfy { nativeUsage.contains($0) }, "the native usage text lists send, edit and delete so a usage stop never reads as send being unsupported")
+}
+// Readback divergence: where the composer text differed, without message content.
+do {
+  let curly = readbackDivergence("say \u{201C}hi\u{201D}\n", "say \"hi\"")
+  check(curly["observed"] as? Bool == true && curly["firstDifference"] as? Int == 4 && curly["windowStart"] as? Int == 1 && curly["expectedLength"] as? Int == 8 && curly["observedLength"] as? Int == 8, "a curly-quote substitution reports its offset and both lengths")
+  check(curly["expectedAround"] as? [String] == ["letter", "letter", "U+0020", "U+0022", "letter", "letter", "U+0022"] && curly["observedAround"] as? [String] == ["letter", "letter", "U+0020", "U+201C", "letter", "letter", "U+201D"], "letters stay a kind while punctuation and whitespace keep codepoints")
+  check(curly["equalAfterQuoteFolding"] as? Bool == true && curly["equalIgnoringWhitespace"] as? Bool == false && curly["observedIsPrefix"] as? Bool == false, "quote folding explains a typographic substitution")
+  check(!String(describing: readbackDivergence("secret words here\n", "secret word here")).contains("secret"), "no message text appears in the divergence evidence")
+  let partial = readbackDivergence("see https://exa\n", "see https://example.com")
+  check(partial["observedIsPrefix"] as? Bool == true && partial["firstDifference"] as? Int == 15 && partial["equalAfterQuoteFolding"] as? Bool == false, "a truncated readback is reported as a prefix")
+  let spacing = readbackDivergence("a  b\n", "a b")
+  check(spacing["equalIgnoringWhitespace"] as? Bool == true && spacing["observedAround"] as? [String] == ["letter", "U+0020", "U+0020", "letter"], "whitespace rewriting is distinguishable from content changes")
+  let emoji = readbackDivergence("hi  there!\n", "hi :wave: there")
+  check(emoji["comparedWithoutShortcodes"] as? Bool == true && emoji["firstDifference"] as? Int == 9 && emoji["expectedLength"] as? Int == 9, "a dropped shortcode is compared against the shortcode-free text")
+  let missing = readbackDivergence(nil, "hi")
+  check(missing["observed"] as? Bool == false && missing["expectedLength"] as? Int == 2 && missing["firstDifference"] == nil, "an unreadable composer reports no offset")
+}
 // Composition guards: readback, identity and comparison rules.
 check(composerText("hello\n") == "hello" && composerText(nil) == nil,"composer text drops only Quill's trailing newline")
 check(composerReadbackMatches("hi there \n","hi there :wave:") && composerReadbackMatches("hi there :wave:\n","hi there :wave:"),"a known shortcode may become an inline emoji that AXValue omits")
@@ -5354,7 +5384,7 @@ print("Passed \(count) native Slack guard checks")
       const inputs = await writeNativeSnapshot(guards, directory);
       const binary = path.join(directory, 'checks');
       await run(nativeCompileCommand(guards, inputs, binary), guards.recipe.compileTimeout);
-      expect(await run([binary], 10000)).toBe('Passed 6288 native Slack guard checks\n');
+      expect(await run([binary], 10000)).toBe('Passed 6302 native Slack guard checks\n');
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

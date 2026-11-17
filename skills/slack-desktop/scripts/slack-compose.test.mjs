@@ -6,7 +6,75 @@ import {
   validMessageReference,
   validSendDestination,
 } from './slack-compose.mjs';
-import { parseCLI } from './slack-format.mjs';
+import { formatOutput, parseCLI } from './slack-format.mjs';
+
+describe('readback divergence evidence', () => {
+  const readback = {
+    observed: true,
+    expectedLength: 8,
+    observedLength: 8,
+    firstDifference: 4,
+    windowStart: 1,
+    expectedAround: ['letter', 'letter', 'U+0020', 'U+0022', 'letter', 'letter', 'U+0022'],
+    observedAround: ['letter', 'letter', 'U+0020', 'U+201C', 'letter', 'letter', 'U+201D'],
+    comparedWithoutShortcodes: false,
+    equalAfterQuoteFolding: true,
+    equalIgnoringWhitespace: false,
+    observedIsPrefix: false,
+  };
+  const receipt = {
+    status: 'stopped',
+    error: 'Composer text did not read back exactly; nothing was sent',
+    actionMayHaveOccurred: false,
+    readback,
+    recovery: ['Cleared the unverified text this command entered; nothing was sent'],
+  };
+
+  test('text, json and full-json all carry where the readback diverged', () => {
+    const compact = compactCompose(receipt, 'send', '@alex');
+    expect(compact.readback).toEqual(readback);
+    const text = formatOutput(compact, 'text', receipt);
+    expect(text).toContain('Nothing was changed.');
+    expect(text).toContain('first difference at character 4 (expected 8 characters, observed 8)');
+    expect(text).toContain('U+201C');
+    expect(text).toContain('matches once curly quotes are folded');
+    expect(JSON.parse(formatOutput(compact, 'json', receipt)).readback).toEqual(readback);
+    expect(JSON.parse(formatOutput(compact, 'full-json', receipt)).readback).toEqual(readback);
+  });
+
+  test('only offsets, lengths, character kinds and booleans pass through', () => {
+    const compact = compactCompose(
+      {
+        ...receipt,
+        readback: {
+          ...readback,
+          observedText: 'private words',
+          expectedAround: ['letter', 'private'],
+          firstDifference: -1,
+        },
+      },
+      'send',
+      '@alex'
+    );
+    expect(compact.readback.observedText).toBeUndefined();
+    expect(compact.readback.expectedAround).toBeNull();
+    expect(compact.readback.firstDifference).toBeNull();
+    expect(JSON.stringify(compact)).not.toContain('private');
+  });
+
+  test('an unreadable composer and an absent readback stay distinct', () => {
+    const unreadable = compactCompose(
+      { ...receipt, readback: { observed: false, expectedLength: 2 } },
+      'edit',
+      'C0CHAN:1700000000.000002'
+    );
+    expect(unreadable.readback).toEqual({ observed: false, expectedLength: 2 });
+    expect(renderCompose(unreadable)).toContain('composer value could not be read');
+    const plain = compactCompose({ status: 'stopped', error: 'x' }, 'send', '#general');
+    expect('readback' in plain).toBe(false);
+    expect(renderCompose(plain)).not.toContain('Readback');
+  });
+});
 
 describe('message text normalization', () => {
   test('translates known emoji to shortcodes with word boundaries', () => {

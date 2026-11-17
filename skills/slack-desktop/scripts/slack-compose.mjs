@@ -117,6 +117,7 @@ export function compactCompose(receipt, operation, requested) {
       ...(Array.isArray(receipt.recovery) && receipt.recovery.length
         ? { recovery: receipt.recovery.filter((step) => typeof step === 'string') }
         : {}),
+      ...(readbackEvidence(receipt.readback) ? { readback: readbackEvidence(receipt.readback) } : {}),
     };
   }
   requireState(
@@ -143,12 +144,58 @@ export function compactCompose(receipt, operation, requested) {
   };
 }
 
+// Readback evidence describes where composer text diverged by offset, length and
+// character kind only. Anything that is not one of these fields is dropped, so
+// no message text can pass through.
+const READBACK_KIND = /^(?:letter|digit|U\+[0-9A-F]{4,6})$/;
+function readbackEvidence(value) {
+  if (!object(value) || typeof value.observed !== 'boolean') return null;
+  const count = (n) => (Number.isSafeInteger(n) && n >= 0 ? n : null);
+  const kinds = (list) =>
+    Array.isArray(list) && list.length <= 7 && list.every((k) => READBACK_KIND.test(k))
+      ? list
+      : null;
+  const flag = (b) => (typeof b === 'boolean' ? b : null);
+  const evidence = { observed: value.observed, expectedLength: count(value.expectedLength) };
+  if (!value.observed) return evidence;
+  return {
+    ...evidence,
+    observedLength: count(value.observedLength),
+    firstDifference: count(value.firstDifference),
+    windowStart: count(value.windowStart),
+    expectedAround: kinds(value.expectedAround),
+    observedAround: kinds(value.observedAround),
+    comparedWithoutShortcodes: flag(value.comparedWithoutShortcodes),
+    equalAfterQuoteFolding: flag(value.equalAfterQuoteFolding),
+    equalIgnoringWhitespace: flag(value.equalIgnoringWhitespace),
+    observedIsPrefix: flag(value.observedIsPrefix),
+  };
+}
+
+function readbackLine(readback) {
+  if (!readback.observed) return 'Readback: the composer value could not be read.';
+  const hints = [
+    readback.equalAfterQuoteFolding && 'matches once curly quotes are folded',
+    readback.equalIgnoringWhitespace && 'matches ignoring whitespace',
+    readback.observedIsPrefix && 'Slack showed only the start of the text',
+  ].filter(Boolean);
+  const around = (list) => (list ? list.join(' ') : 'unknown');
+  return [
+    `Readback: first difference at character ${readback.firstDifference ?? '?'} (expected ${readback.expectedLength ?? '?'} characters, observed ${readback.observedLength ?? '?'}).`,
+    `Expected near it: ${around(readback.expectedAround)}; observed: ${around(readback.observedAround)}.`,
+    hints.length ? `Likely cause: ${hints.join('; ')}.` : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
 export function renderCompose(compact) {
   if (compact.status !== 'ok') {
     const lines = [`${compact.operation} stopped: ${compact.error}`];
     if (compact.actionMayHaveOccurred === true)
       lines.push('The action may have taken effect; check before retrying.');
     if (compact.actionMayHaveOccurred === false) lines.push('Nothing was changed.');
+    if (compact.readback) lines.push(readbackLine(compact.readback));
     if (compact.candidates?.length)
       lines.push(
         `Candidates: ${compact.candidates.map((c) => (c.handle ? `${c.name} (${c.handle})` : c.name)).join(', ')}`
