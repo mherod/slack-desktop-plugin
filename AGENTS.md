@@ -6,6 +6,7 @@
 
 - **DO** make skill changes (scripts, tests, `SKILL.md`, references) in the upstream copy, run its tests there, then run `bun scripts/export-skill.mjs <upstream-skills-root>` here. The export copies the skill without upstream-only files, vendors `scripts/lib/`, runs `.redaction/redact.mjs` and records a content hash in `skill-export.json`.
 - **DO** review the exported diff before committing: every export becomes public. Use `--dry-run` first to see which files would change.
+- **DO** bump the patch version in all five manifests (`package.json`, `plugin.json`, `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `.codex-plugin/plugin.json`) with every export that changes `skills/`, then run `bun run check:manifests`. Installed copies compare that version, so an unbumped export never reaches them.
 - **DON'T** hand-edit anything under `skills/`. `bun run check:export` (also in CI) fails when the tree no longer matches `skill-export.json`. It proves nothing was edited here since the last export; it does not prove the skill is current with upstream.
 - **Check:** after an export, `bun run check:export` passes and `bun test skills/slack-desktop/scripts --parallel=4` passes here.
 
