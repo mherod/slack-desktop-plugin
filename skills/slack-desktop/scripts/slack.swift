@@ -965,9 +965,19 @@ func dmSuggestionHandles(_ element: AXUIElement) throws -> [String] {
       }
   }.map { label($0.element) }
 }
+// Slack's picker labels an app or agent DM "NAME (agent)" while the opened
+// conversation's title and sidebar row show NAME. Only that observed label is
+// accepted, and navigation still requires the exact NAME title and a D ID.
+let dmAgentLabel = " (agent)"
+func dmDestinationName(_ person: String) -> String {
+  person.hasSuffix(dmAgentLabel) && person.count > dmAgentLabel.count
+    ? String(person.dropLast(dmAgentLabel.count)) : person
+}
 func dmSuggestionMatches(_ name: String?, _ handles: [String], _ query: String) -> Bool {
   guard let name else { return false }
-  return query.hasPrefix("@") ? handles.count == 1 && handles[0] == query : name == query
+  return query.hasPrefix("@")
+    ? handles.count == 1 && handles[0] == query
+    : name == query || name == query + dmAgentLabel
 }
 func channelSuggestionMatches(_ name: String, _ query: String) -> Bool {
   // Parenthesized labels are observed metadata, not proof of destination kind.
@@ -1516,7 +1526,7 @@ func searchOrNavigate(
         role(destinations[0].element), string(destinations[0].element, "AXDOMIdentifier"),
         expected, classes(destinations[0].element))
     else { throw Failure(description: "Exact DM destination changed; Return withheld") }
-    name = person
+    name = dmDestinationName(person)
   } else {
     name = kind == .group ? expected : query
   }

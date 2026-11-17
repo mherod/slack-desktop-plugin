@@ -68,9 +68,10 @@ func composerText(_ value: String?) -> String? {
 }
 
 // Comparable message text: Slack renders shortcodes as images, markdown as
-// formatting and wraps lines into sections, so compare the plain words.
+// formatting, smart quotes as curly quotes and wraps lines into sections, so
+// compare the plain words.
 func composeComparable(_ value: String) -> String {
-  var text = value.replacingOccurrences(
+  var text = foldTypography(value).replacingOccurrences(
     of: #":[a-z0-9_+\-']+:"#, with: " ", options: [.regularExpression, .caseInsensitive])
   text = text.replacingOccurrences(of: #"[*_~`]"#, with: "", options: .regularExpression)
   return text.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
@@ -78,12 +79,14 @@ func composeComparable(_ value: String) -> String {
 }
 
 // Slack's editor turns a known :shortcode: into an inline emoji element that
-// AXValue omits. Every other character must read back exactly.
+// AXValue omits, and its smart quotes turn ' and " into ‘’ and “” as the text
+// lands. Every other character must read back exactly.
 func composerReadbackMatches(_ observed: String?, _ text: String) -> Bool {
-  guard let observed = composerText(observed) else { return false }
-  if observed == text { return true }
+  guard let observed = composerText(observed).map(foldTypography) else { return false }
+  let typed = foldTypography(text)
+  if observed == typed { return true }
   return observed
-    == text.replacingOccurrences(
+    == typed.replacingOccurrences(
       of: #":[a-z0-9_+\-']+:"#, with: "", options: [.regularExpression, .caseInsensitive])
 }
 
@@ -306,8 +309,10 @@ func foldTypography(_ value: String) -> String {
   var folded = ""
   for scalar in value.unicodeScalars {
     switch scalar.value {
-    case 0x2018, 0x2019, 0x201A, 0x201B, 0x2032: folded.append("'")
-    case 0x201C, 0x201D, 0x201E, 0x201F, 0x2033: folded.append("\"")
+    // Only the curly pairs Slack's smart quotes produce; primes and low quotes
+    // are distinct characters and must read back as typed.
+    case 0x2018, 0x2019: folded.append("'")
+    case 0x201C, 0x201D: folded.append("\"")
     default: folded.unicodeScalars.append(scalar)
     }
   }

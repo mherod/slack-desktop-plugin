@@ -4090,6 +4090,9 @@ for marker in ["c-search_autocomplete__suggestion_item--query","c-search_autocom
 }
 check(pickerDMName(" Leading , direct message") == " Leading ", "significant name whitespace is preserved, never normalized")
 check(!dmSuggestionMatches(nil,["@alex"],"@alex"), "a handle cannot authorize a non-person row")
+check(dmSuggestionMatches(pickerDMName("ploog (agent), Direct Message"),[],"ploog") && dmSuggestionMatches(pickerDMName("ploog (agent), direct message"),[],"ploog (agent)") && dmDestinationName("ploog (agent)") == "ploog" && dmDestinationName("Alex") == "Alex", "an agent DM labelled NAME (agent) matches NAME and navigates by the NAME title")
+check(!dmSuggestionMatches("ploog (agent)",[],"plo") && !dmSuggestionMatches("ploog (bot)",[],"ploog") && !dmSuggestionMatches("ploog (Agent)",[],"ploog") && !dmSuggestionMatches("ploog  (agent)",[],"ploog") && !dmSuggestionMatches("Alex (agent) (agent)",[],"Alex"), "only the exact observed agent label is accepted, never another parenthesized suffix")
+check(dmDestinationName(" (agent)") == " (agent)" && dmDestinationName("ploog (agent) ") == "ploog (agent) ", "a bare or padded agent label is never stripped to an empty or altered name")
 
 // The group history marker is UI metadata only in the exact observed layouts.
 let directForewordClasses = ["c-button-unstyled","p-message_pane__foreword__avatar","c-avatar","c-avatar--interactive"]
@@ -5343,6 +5346,9 @@ do {
 check(composerText("hello\n") == "hello" && composerText(nil) == nil,"composer text drops only Quill's trailing newline")
 check(composerReadbackMatches("hi there \n","hi there :wave:") && composerReadbackMatches("hi there :wave:\n","hi there :wave:"),"a known shortcode may become an inline emoji that AXValue omits")
 check(!composerReadbackMatches("hi there!\n","hi there") && !composerReadbackMatches("hi\n","hi there :wave:") && !composerReadbackMatches(nil,"hi"),"every non-shortcode character must read back exactly")
+check(composerReadbackMatches("It\u{2019}s \u{201C}send\u{201D}\n","It's \"send\"") && composerReadbackMatches("It\u{2019}s :wave:\n","It's :wave:") && composerReadbackMatches("It\u{2019}s \n","It's :wave:"),"Slack smart quotes may curl straight quotes, alone or beside a shortcode")
+check(!composerReadbackMatches("It\u{2019}s\n","Its") && !composerReadbackMatches("It\u{2032}s\n","It's") && !composerReadbackMatches("\u{201E}send\u{201C}\n","\"send\"") && !composerReadbackMatches("It\u{2019}s\n","It\"s"),"a curly quote replaces only its own straight quote; primes, low quotes and added characters still stop the send")
+check(composeComparable("It\u{2019}s \u{201C}send\u{201D}") == composeComparable("It's \"send\"") && sameMessageText("It\u{2019}s done","It's done") && rowComparable("It\u{2019}s done (edited)").text == "It's done","delivery, edit and delete verification compare text after folding smart quotes")
 check(composeComparable("a *bold*  _move_\n:tada: ~x~") == "a bold move x","comparison ignores markdown markers, shortcodes and whitespace layout")
 check(rowComparable("hello (edited)").text == "hello" && rowComparable("hello (edited)").edited && !rowComparable("hello").edited,"the edited marker is separated from message text")
 check(sameMessageText("note (edited) (edited)","note (edited)") && sameMessageText("note","note (edited)") && !sameMessageText("note","other") && !sameMessageText("",""),"delete confirmation text matches modulo one edited marker and never on empty text")
@@ -5384,7 +5390,7 @@ print("Passed \(count) native Slack guard checks")
       const inputs = await writeNativeSnapshot(guards, directory);
       const binary = path.join(directory, 'checks');
       await run(nativeCompileCommand(guards, inputs, binary), guards.recipe.compileTimeout);
-      expect(await run([binary], 10000)).toBe('Passed 6302 native Slack guard checks\n');
+      expect(await run([binary], 10000)).toBe('Passed 6308 native Slack guard checks\n');
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
