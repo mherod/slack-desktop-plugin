@@ -117,7 +117,9 @@ export function compactCompose(receipt, operation, requested) {
       ...(Array.isArray(receipt.recovery) && receipt.recovery.length
         ? { recovery: receipt.recovery.filter((step) => typeof step === 'string') }
         : {}),
-      ...(readbackEvidence(receipt.readback) ? { readback: readbackEvidence(receipt.readback) } : {}),
+      ...(readbackEvidence(receipt.readback)
+        ? { readback: readbackEvidence(receipt.readback) }
+        : {}),
     };
   }
   requireState(

@@ -1,5 +1,13 @@
 # Agent guide
 
+## Skill source of truth
+
+`skills/slack-desktop` here is a redacted copy of `slack-desktop` in the private `mherod/skills` repo (installed at `~/.claude/skills/slack-desktop`). Syncs pull from that copy into this repo, so a change made only here is overwritten by the next sync.
+
+- **DO** land every script, test or SKILL.md change in both repos, then run `bun test slack-desktop/scripts --parallel=4` from the skills repo root and `bun test skills/slack-desktop/scripts --parallel=4` here.
+- **DO** port with `git diff <base> <sha> -- skills/slack-desktop | git -C ~/.claude/skills apply -p2`, then copy back any formatting the skills repo pre-commit applies so both copies match.
+- **Check:** `diff -rq ~/.claude/skills/slack-desktop/scripts skills/slack-desktop/scripts` lists only the redacted test fixtures (`slack-compose.test.mjs`, `slack-members-close.test.mjs`, `slack-save-runner.test.mjs`, `slack-workspace-cli.test.mjs`) and this repo's `lib/`.
+
 ## Public copy
 
 Applies to the GitHub repo description, README intro, plugin manifest descriptions (`plugin.json`, `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`) and marketplace listings.
