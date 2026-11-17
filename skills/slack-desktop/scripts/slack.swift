@@ -1184,7 +1184,11 @@ func conversationListLabelMatches(_ value: String, _ name: String, _ target: [St
 {
   guard !name.isEmpty, let kind = target["kind"] as? String, ["channel", "dm"].contains(kind)
   else { return false }
-  let kinds = kind == "channel" ? ["channel", "private channel"] : [conversationListKind(target)]
+  // A Slack Connect channel labels its list "NAME (shared channel)"; the JS
+  // layer and source-list checks already accept it.
+  let kinds =
+    kind == "channel"
+    ? ["channel", "private channel", "shared channel"] : [conversationListKind(target)]
   return kinds.contains { listKind in
     let prefix = "\(name) (\(listKind)"
     return value == "\(prefix))" || value.hasPrefix("\(prefix),")

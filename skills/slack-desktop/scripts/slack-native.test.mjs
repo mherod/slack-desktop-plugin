@@ -3127,7 +3127,7 @@ for missing in [1,2,4] {
 let mediaChannelTarget: [String: Any] = ["kind":"channel"]
 for decoration in ["","* ","! "] {
   for identifier in ["C1","G1"] {
-    for kind in ["channel","private channel"] {
+    for kind in ["channel","private channel","shared channel"] {
       for suffix in ["",", 1 unread highlight"] {
         check(mainListMatchesTitle("\(decoration)project-help (Channel) - Team - Slack",identifier,"project-help (\(kind)\(suffix))"), "main thread root anchor recognizes exact supported channel list qualifiers after title and ID proof")
       }
@@ -3144,7 +3144,6 @@ for (title,id,label) in [
   ("project-help (Channel) - Team - Slack","C1","other (private channel)"),
   ("project-help (Channel) - Team - Slack","C1","project-help (private channel extra)"),
   ("project-help (Channel) - Team - Slack","C1","project-help (shared channel extra)"),
-  ("project-help (Channel) - Team - Slack","C1","project-help (shared channel)"),
   ("project-help (Channel) - Team - Slack","C1","project-help (public channel)"),
   ("project-help (Channel) - Team - Slack","C1","project-help (direct message)"),
   ("project-help (channel) - Team - Slack","C1","project-help (private channel)"),
@@ -3155,7 +3154,8 @@ for (title,id,label) in [
 ] {
   check(!mainListMatchesTitle(title,id,label), "channel list labels never relax exact destination title, canonical ID, name or conversation kind")
 }
-check(!conversationListLabelMatches("project-help (shared channel, 1 unread highlight)","project-help",mediaChannelTarget), "unobserved shared qualifier preserves existing native reader behavior")
+check(conversationListLabelMatches("project-help (shared channel)","project-help",mediaChannelTarget) && conversationListLabelMatches("project-help (shared channel, 1 unread highlight)","project-help",mediaChannelTarget), "a Slack Connect channel list, observed live as NAME (shared channel), is accepted like the JS layer does")
+check(!conversationListLabelMatches("other (shared channel)","project-help",mediaChannelTarget) && !conversationListLabelMatches("project-help (shared channel) extra","project-help",mediaChannelTarget) && !conversationListLabelMatches("project-help (shared channelx)","project-help",mediaChannelTarget), "a shared list still needs the exact name and a closed qualifier")
 check(!conversationListLabelMatches("project-help (shared channel)","project-help",["kind":"dm"]), "shared channel qualifier cannot classify a DM")
 for label in ["project-help (channel)", "project-help (channel, unread)", "project-help (private channel)", "project-help (private channel, 2 unread messages)"] {
   check(conversationListLabelMatches(label, "project-help", mediaChannelTarget), "exact public/private channel list accepted")
@@ -5482,7 +5482,7 @@ print("Passed \(count) native Slack guard checks")
       const binary = path.join(directory, 'checks');
       await run(nativeCompileCommand(guards, inputs, binary), guards.recipe.compileTimeout);
       expect(await run([binary], 10000)).toBe(
-        `Passed ${6312 + seamLists.length + 1 + NATIVE_COMMANDS} native Slack guard checks\n`
+        `Passed ${6324 + seamLists.length + 1 + NATIVE_COMMANDS} native Slack guard checks\n`
       );
     } finally {
       await rm(directory, { recursive: true, force: true });
