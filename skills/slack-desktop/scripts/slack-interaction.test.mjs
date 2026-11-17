@@ -2,8 +2,65 @@ import { afterEach, expect, test } from 'bun:test';
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { foregroundEvidence, nativeInteractionArgs } from './slack-interaction.mjs';
+import {
+  foregroundEvidence,
+  membersMaxSeconds,
+  nativeCommandArgs,
+  nativeInteractionArgs,
+} from './slack-interaction.mjs';
 import { saveMedia } from './slack-save-runner.mjs';
+
+test('native command arguments keep flag order, then the interaction and workspace prefixes', () => {
+  expect(
+    nativeCommandArgs({
+      args: ['read-dm', 'Alex Example'],
+      page: { direction: 'older', cursor: 'DDEMO:1700000000.000000' },
+      pages: 3,
+      since: { epoch: 1700000000 },
+      allowClipboard: true,
+      interaction: 'foreground',
+      workspaceTarget: 'Example Team',
+    })
+  ).toEqual([
+    '--interaction=foreground',
+    '--workspace=Example Team',
+    'read-dm',
+    'Alex Example',
+    '--before=DDEMO:1700000000.000000',
+    '--pages=3',
+    '--since=1700000000',
+    '--allow-clipboard',
+  ]);
+  expect(
+    nativeCommandArgs({
+      args: ['send', '@alex'],
+      allowClipboard: true,
+      textTranslation: { submittedText: 'hi :wave:' },
+    })
+  ).toEqual(['send', '@alex', '--allow-clipboard', '--text=hi :wave:']);
+  expect(
+    nativeCommandArgs({
+      args: ['inspect'],
+      ui: { filter: '', limit: 80, depth: 20, prepare: true },
+      workspaceTarget: undefined,
+    })
+  ).toEqual(['inspect', '--ui', '--filter=', '--limit=80', '--depth=20', '--prepare']);
+  expect(
+    nativeCommandArgs({ args: ['read-channel', 'general'], pages: 1, since: { epoch: 1 } })
+  ).toEqual(['read-channel', 'general', '--pages=1']);
+});
+
+test('members gets a default collection budget that --max-seconds overrides', () => {
+  expect(membersMaxSeconds({ args: ['members', 'general'] })).toBe(160);
+  expect(membersMaxSeconds({ args: ['members', 'general'], pages: 2 })).toBe(70);
+  expect(membersMaxSeconds({ args: ['members', 'general'], pages: 2, maxSeconds: 30 })).toBe(30);
+  expect(membersMaxSeconds({ args: ['read-channel', 'general'], maxSeconds: 30 })).toBeUndefined();
+  expect(nativeCommandArgs({ args: ['members', 'general'] })).toEqual([
+    'members',
+    'general',
+    '--max-seconds=160',
+  ]);
+});
 
 test('native mode prefix preserves query position and page/clipboard arguments', () => {
   const args = ['search', '--interaction=foreground', '--pages=3'];

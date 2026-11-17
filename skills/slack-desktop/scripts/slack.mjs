@@ -22,7 +22,7 @@ import { collectDMSearchPages } from './slack-dm-search.mjs';
 import { parseCLI, formatOutput } from './slack-format.mjs';
 import { acquireLock, DEFAULT_LOCK_TIMEOUT } from './slack-lock.mjs';
 import { compactUIOutput, compactUIObservation, formatUIOutput } from './slack-ui.mjs';
-import { nativeInteractionArgs, foregroundEvidence } from './slack-interaction.mjs';
+import { foregroundEvidence, membersMaxSeconds, nativeCommandArgs } from './slack-interaction.mjs';
 import { normalizeSearchQuery, validateSearchQueryTranslation } from './slack-search-query.mjs';
 import { compactWorkspaces } from './slack-workspaces.mjs';
 import { compactThreadClose } from './slack-thread-close.mjs';
@@ -308,32 +308,21 @@ try {
     checkCancelled();
     const nativeBundle = await captureNativeBundle(SLACK_NATIVE_BUNDLE, { checkCancelled });
     const binary = await buildNativeBundle(nativeBundle, cache, { run, checkCancelled });
-    const nativeArgs = page
-      ? [...args, `${page.direction === 'older' ? '--before' : '--after'}=${page.cursor}`]
-      : [...args];
-    if (pages !== undefined) nativeArgs.push(`--pages=${pages}`);
-    const membersMaxSeconds =
-      args[0] === 'members' ? (maxSeconds ?? (pages === undefined ? 160 : 70)) : undefined;
-    if (membersMaxSeconds !== undefined) nativeArgs.push(`--max-seconds=${membersMaxSeconds}`);
-    if (since !== undefined && pages > 1) nativeArgs.push(`--since=${since.epoch}`);
-    if (dmSearch !== undefined) nativeArgs.push(`--search=${dmSearch}`);
-    if (allowClipboard) nativeArgs.push('--allow-clipboard');
-    if (textTranslation) nativeArgs.push(`--text=${textTranslation.submittedText}`);
-    if (confirmDelete) nativeArgs.push('--confirm-delete');
-    if (ui) {
-      nativeArgs.push(
-        '--ui',
-        `--filter=${ui.filter}`,
-        `--limit=${ui.limit}`,
-        `--depth=${ui.depth}`
-      );
-      if (ui.prepare) nativeArgs.push('--prepare');
-    }
-    // Select and pin the requested workspace in the same native process as the
-    // command. Never spawn a separate switch followed by an unbound read.
-    const commandArgs = nativeInteractionArgs(nativeArgs, interaction);
-    if (workspaceTarget !== undefined)
-      commandArgs.splice(interaction === 'foreground' ? 1 : 0, 0, `--workspace=${workspaceTarget}`);
+    const membersSeconds = membersMaxSeconds({ args, maxSeconds, pages });
+    const commandArgs = nativeCommandArgs({
+      args,
+      page,
+      pages,
+      maxSeconds,
+      since,
+      dmSearch,
+      allowClipboard,
+      textTranslation,
+      confirmDelete,
+      ui,
+      interaction,
+      workspaceTarget,
+    });
     // members and the directory reads scroll lazily loaded lists by default.
     const extendedRuntime =
       pages > 1 ||
@@ -413,8 +402,8 @@ try {
       ({ code, text } = await run(
         [binary, ...commandArgs],
         // Member collection keeps its requested budget plus navigation/closure time.
-        (membersMaxSeconds !== undefined
-          ? (membersMaxSeconds + 20) * 1000
+        (membersSeconds !== undefined
+          ? (membersSeconds + 20) * 1000
           : extendedRuntime
             ? 90000
             : 30000) + (workspaceTarget !== undefined ? 15000 : 0),

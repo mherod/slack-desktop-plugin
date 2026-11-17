@@ -9,6 +9,72 @@ import {
   writeNativeSnapshot,
   nativeCompileCommand,
 } from './slack-native-build.mjs';
+import { parseCLI } from './slack-format.mjs';
+import { nativeCommandArgs } from './slack-interaction.mjs';
+import { normalizeMessageText } from './slack-compose.mjs';
+import { normalizeSearchQuery } from './slack-search-query.mjs';
+
+// Wrapper-to-native seam. Each command line must parse in the wrapper, and the
+// native argument list the wrapper then emits must parse in the helper, so a
+// flag one side accepts can never stop at the other (send --allow-clipboard).
+const SEAM_CASES = [
+  ['inspect'],
+  ['inspect', '--ui', '--filter=Search', '--limit=40', '--depth=12'],
+  ['inspect', '--ui', '--prepare'],
+  ['permissions'],
+  ['permissions', '--request'],
+  ['workspaces'],
+  ['current-workspace'],
+  ['switch-workspace', 'workspace:example.slack.com'],
+  ['--interaction=foreground', 'switch-workspace', 'Example Team'],
+  ['channels'],
+  ['channels', '--pages=3'],
+  ['dms'],
+  ['dms', '--pages=2', '--filter=Alex'],
+  ['dms', '--search=Alex', '--allow-clipboard'],
+  ['dms', '--search='],
+  ['close-thread'],
+  ['close-members'],
+  ['browse-channels', '--pages=2'],
+  ['browse-people'],
+  ['members', 'general'],
+  ['members', 'general', '--pages=2', '--max-seconds=60'],
+  ['channel', 'general'],
+  ['search', 'deploy checklist'],
+  ['search', 'deploy checklist', '--pages=2'],
+  ['read-channel', 'general'],
+  ['read-channel', 'general', '--pages=3'],
+  ['read-channel', 'general', '--before=CDEMO:1700000000.000001'],
+  ['read-dm', 'Alex Example', '--allow-clipboard'],
+  ['read-dm', '@alex', '--after=DDEMO:1700000000.000000'],
+  ['read-dm', 'group:CDEMO'],
+  ['read-dm', 'group-name:Project planning', '--allow-clipboard'],
+  ['read-thread', 'CDEMO:1700000000.000001', '--pages=2'],
+  ['read-media', 'FFILE1'],
+  ['read-transcript', 'CDEMO:1700000000.000001/m1', '--pages=2'],
+  ['--workspace=workspace:example.slack.com', 'read-channel', 'general'],
+  ['--interaction=foreground', '--workspace=Example Team', 'search', 'deploy'],
+  ['send', '#general', '--text=hi'],
+  ['send', 'Alex Example', '--allow-clipboard', '--text=hi'],
+  ['send', 'thread:CDEMO:1700000000.000001', '--text=hi'],
+  ['edit', 'CDEMO:1700000000.000001', '--text=edited'],
+  ['delete', 'CDEMO:1700000000.000001', '--confirm-delete'],
+];
+function wrapperNativeArgs(argv) {
+  const parsed = parseCLI(argv);
+  let args = parsed.args;
+  const search = args[0] === 'search' ? normalizeSearchQuery(args[1]) : undefined;
+  if (search) args = [args[0], search.submittedQuery];
+  const textTranslation = parsed.text === undefined ? undefined : normalizeMessageText(parsed.text);
+  return nativeCommandArgs({ ...parsed, args, textTranslation });
+}
+const seamLists = SEAM_CASES.map(wrapperNativeArgs);
+for (const value of seamLists.flat())
+  if (!/^[\x20-\x7e]*$/.test(value))
+    throw new Error(`seam case needs a printable ASCII value: ${value}`);
+const swiftLists = `[${seamLists.map((list) => `[${list.map((value) => JSON.stringify(value)).join(', ')}]`).join(', ')}]`;
+// Bare and target command counts from nativeBareCommands and nativeTargetCommands.
+const NATIVE_COMMANDS = 9 + 13;
 
 async function run(command, timeout) {
   const child = Bun.spawn(command, { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
@@ -5378,6 +5444,26 @@ do {
   check(sendFallbackBlocker(SendFallbackEvidence(sameEditor: true, sameSend: true, textReadsBack: false, newRows: 0, windowMatches: true, noModal: true))?.contains("exactly this text") == true, "an emptied or edited composer withholds Return")
   check([SendFallbackEvidence(sameEditor: false, sameSend: true, textReadsBack: true, newRows: 0, windowMatches: true, noModal: true), SendFallbackEvidence(sameEditor: true, sameSend: false, textReadsBack: true, newRows: 0, windowMatches: true, noModal: true), SendFallbackEvidence(sameEditor: true, sameSend: true, textReadsBack: true, newRows: 0, windowMatches: false, noModal: true), SendFallbackEvidence(sameEditor: true, sameSend: true, textReadsBack: true, newRows: 0, windowMatches: true, noModal: false)].allSatisfy { sendFallbackBlocker($0) != nil }, "a replaced editor or button, a changed window or a new dialog withholds Return")
 }
+// Every native argument list the wrapper emits parses in the helper, and every
+// command the helper accepts is listed in its usage text.
+do {
+  let wrapperLists: [[String]] = ${swiftLists}
+  for list in wrapperLists {
+    do {
+      let (_, scoped) = try workspaceArguments(list)
+      let (_, command) = try interactionArguments(scoped)
+      _ = try parseNativeRequest(command)
+      count += 1
+    } catch {
+      fatalError("native parser rejected wrapper arguments \(list): \(error)")
+    }
+  }
+  check(nativeBareCommands.count + nativeTargetCommands.count == ${NATIVE_COMMANDS}, "command lists match the test's expected count")
+  let listed = Set(nativeUsage.dropFirst("Usage: ".count).components(separatedBy: " | ").map { String($0.split(separator: " ").first ?? "") })
+  for name in nativeBareCommands + nativeTargetCommands {
+    check(listed.contains(name), "usage text lists \(name)")
+  }
+}
 try checkDMQueryClipboard()
 print("Passed \(count) native Slack guard checks")
 `;
@@ -5395,7 +5481,9 @@ print("Passed \(count) native Slack guard checks")
       const inputs = await writeNativeSnapshot(guards, directory);
       const binary = path.join(directory, 'checks');
       await run(nativeCompileCommand(guards, inputs, binary), guards.recipe.compileTimeout);
-      expect(await run([binary], 10000)).toBe('Passed 6312 native Slack guard checks\n');
+      expect(await run([binary], 10000)).toBe(
+        `Passed ${6312 + seamLists.length + 1 + NATIVE_COMMANDS} native Slack guard checks\n`
+      );
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

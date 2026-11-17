@@ -11155,36 +11155,51 @@ func dmHubContent(_ workspace: Workspace, _ expected: ListingPage, deadline: Dat
     })
 }
 
+// Commands the helper accepts, by how many positional arguments they take.
+// The usage text and the validity check both read these lists.
+let nativeBareCommands = [
+  "inspect", "workspaces", "current-workspace", "channels", "dms", "close-thread",
+  "close-members", "browse-channels", "browse-people",
+]
+let nativeTargetCommands = [
+  "search", "channel", "read-channel", "read-dm", "read-thread", "read-media", "read-transcript",
+  "save-media", "switch-workspace", "members", "send", "edit", "delete",
+]
 let nativeUsage =
-  "Usage: inspect | workspaces | current-workspace | switch-workspace TARGET | channels | dms | read-channel NAME | read-dm NAME_OR_@HANDLE_OR_GROUP:ID | read-thread REF_OR_PERMALINK | read-media REF | read-transcript REF | save-media REF | search QUERY | channel NAME | send #CHANNEL|NAME|@HANDLE|group:ID|thread:REF --text=TEXT [--allow-clipboard] | edit REF --text=TEXT | delete REF --confirm-delete | permissions [--request]"
+  "Usage: inspect | workspaces | current-workspace | switch-workspace TARGET | channels | dms | close-thread | close-members | browse-channels | browse-people | read-channel NAME | read-dm NAME_OR_@HANDLE_OR_GROUP:ID | read-thread REF_OR_PERMALINK | read-media REF | read-transcript REF | save-media REF | members NAME | search QUERY | channel NAME | send #CHANNEL|NAME|@HANDLE|group:ID|thread:REF --text=TEXT [--allow-clipboard] | edit REF --text=TEXT | delete REF --confirm-delete | permissions [--request]"
 
-// MARK: - Command entry point
-do {
-  let (requestedWorkspace, scopedArguments) = try workspaceArguments(
-    Array(CommandLine.arguments.dropFirst()))
-  if let requestedWorkspace {
-    let commandPosition = scopedArguments.first?.hasPrefix("--interaction=") == true ? 1 : 0
-    nativeWorkspaceSelection = WorkspaceSelectionEvidence(
-      requested: requestedWorkspace, operation: scopedArguments[commandPosition])
-  }
-  let (interactionMode, parsedArguments) = try interactionArguments(
-    scopedArguments)
-  var arguments = parsedArguments
-  if interactionMode == .foreground { foregroundInteraction = ForegroundInteraction() }
-  let uiOptions =
-    arguments.first == "inspect" && arguments.count > 1
-    ? try UIOptions(Array(arguments.dropFirst())) : nil
-  if uiOptions != nil { arguments = ["inspect"] }
-  let composition = try composeArguments(arguments)
-  arguments = composition.arguments
-  let composeText = composition.text
+// The command after its --workspace and --interaction prefixes, validated
+// without touching Slack. The entry point runs exactly this, so tests can check
+// every argument list the wrapper emits against it.
+struct NativeRequest {
+  var help = false
+  var permissionsRequest: Bool?
+  var arguments: [String] = []
+  var uiOptions: UIOptions?
+  var composeText: String?
   var page: PageRequest?
   var requestedPages = 1
   var pagesSeen = false
   var membersSeconds: String?
   var sinceEpoch: Double?
   var dmSearch: String?
-  var allowClipboard = composition.allowClipboard
+  var allowClipboard = false
+  var requestedThread: MessageLink?
+  var requestedGroup: String?
+  var requestedGroupName: String?
+  var composeLink: MessageLink?
+}
+func parseNativeRequest(_ input: [String]) throws -> NativeRequest {
+  var request = NativeRequest()
+  var arguments = input
+  request.uiOptions =
+    arguments.first == "inspect" && arguments.count > 1
+    ? try UIOptions(Array(arguments.dropFirst())) : nil
+  if request.uiOptions != nil { arguments = ["inspect"] }
+  let composition = try composeArguments(arguments)
+  arguments = composition.arguments
+  request.composeText = composition.text
+  request.allowClipboard = composition.allowClipboard
   let positionalCount =
     ["channels", "dms", "browse-channels", "browse-people"].contains(arguments.first ?? "")
     ? 1 : 2
@@ -11199,35 +11214,37 @@ do {
     let flags = arguments.dropFirst(positionalCount)
     for flag in flags {
       if flag == "--allow-clipboard" {
-        try require(!allowClipboard, "Specify --allow-clipboard only once")
-        allowClipboard = true
+        try require(!request.allowClipboard, "Specify --allow-clipboard only once")
+        request.allowClipboard = true
       } else if flag.hasPrefix("--search=") {
         let value = String(flag.dropFirst("--search=".count))
         try require(
-          arguments[0] == "dms" && dmSearch == nil && validDMSearchText(value, allowEmpty: true),
+          arguments[0] == "dms" && request.dmSearch == nil
+            && validDMSearchText(value, allowEmpty: true),
           "Use --search once with dms and at most 200 characters without controls")
-        dmSearch = value
+        request.dmSearch = value
       } else if flag.hasPrefix("--pages=") {
         let value = String(flag.dropFirst("--pages=".count))
         try require(
-          !pagesSeen && value.range(of: #"^(?:[1-9]|10)$"#, options: .regularExpression) != nil,
+          !request.pagesSeen
+            && value.range(of: #"^(?:[1-9]|10)$"#, options: .regularExpression) != nil,
           "Specify --pages once with an integer from 1 to 10")
-        requestedPages = Int(value)!
-        pagesSeen = true
+        request.requestedPages = Int(value)!
+        request.pagesSeen = true
       } else if flag.hasPrefix("--max-seconds=") {
         try require(
-          arguments[0] == "members" && membersSeconds == nil,
+          arguments[0] == "members" && request.membersSeconds == nil,
           "Use --max-seconds once with members only")
         let value = String(flag.dropFirst("--max-seconds=".count))
         _ = try membersRuntimeLimit(value, 0)
-        membersSeconds = value
+        request.membersSeconds = value
       } else if flag.hasPrefix("--since=") {
         let value = String(flag.dropFirst("--since=".count))
         try require(
-          sinceEpoch == nil && ["read-channel", "read-dm"].contains(arguments[0])
+          request.sinceEpoch == nil && ["read-channel", "read-dm"].contains(arguments[0])
             && value.range(of: #"^[1-9][0-9]{8,9}$"#, options: .regularExpression) != nil,
           "Specify --since once, as epoch seconds, with read-channel or read-dm")
-        sinceEpoch = Double(value)!
+        request.sinceEpoch = Double(value)!
       } else {
         try require(
           ![
@@ -11235,13 +11252,79 @@ do {
             "browse-people",
           ].contains(arguments[0]),
           "Search, listing, read-transcript and members commands do not accept --before or --after")
-        try require(page == nil, "Specify only one of --before or --after")
-        page = try PageRequest(flag)
+        try require(request.page == nil, "Specify only one of --before or --after")
+        request.page = try PageRequest(flag)
       }
     }
     arguments = Array(arguments.prefix(positionalCount))
   }
+  request.arguments = arguments
   if arguments == ["--help"] {
+    request.help = true
+    return request
+  }
+  if arguments == ["permissions"] || arguments == ["permissions", "--request"] {
+    request.permissionsRequest = arguments.count == 2
+    return request
+  }
+  try require(
+    (arguments.count == 1 && nativeBareCommands.contains(arguments[0]))
+      || (arguments.count == 2 && nativeTargetCommands.contains(arguments[0])),
+    nativeUsage
+  )
+  request.requestedThread =
+    arguments[0] == "read-thread" ? try MessageLink(arguments[1]) : nil
+  if ["read-media", "read-transcript", "save-media"].contains(arguments[0]) {
+    try require(
+      validMediaReference(arguments[1]),
+      "Use an attachment's file ID or MESSAGE/mN reference from read/search output")
+  }
+  request.requestedGroup = arguments[0] == "read-dm" ? try groupDMIdentifier(arguments[1]) : nil
+  request.requestedGroupName = arguments[0] == "read-dm" ? try groupDMName(arguments[1]) : nil
+  try require(
+    request.dmSearch == nil || request.dmSearch == "" || request.allowClipboard,
+    "Direct DMs search requires --allow-clipboard")
+  try require(
+    request.requestedGroupName == nil || request.page != nil || request.allowClipboard,
+    "Group-name lookup requires --allow-clipboard")
+  try require(
+    !request.allowClipboard || request.dmSearch != nil
+      || (arguments[0] == "read-dm" && request.requestedGroup == nil)
+      || (arguments[0] == "send" && !arguments[1].hasPrefix("#")
+        && !arguments[1].hasPrefix("thread:") && !arguments[1].hasPrefix("group:")),
+    "--allow-clipboard requires direct DMs search or a name/handle DM read or send")
+  request.composeLink =
+    ["edit", "delete"].contains(arguments[0])
+    ? try MessageLink(arguments[1])
+    : arguments[0] == "send" && arguments[1].hasPrefix("thread:")
+      ? try MessageLink(String(arguments[1].dropFirst("thread:".count))) : nil
+  return request
+}
+
+// MARK: - Command entry point
+do {
+  let (requestedWorkspace, scopedArguments) = try workspaceArguments(
+    Array(CommandLine.arguments.dropFirst()))
+  if let requestedWorkspace {
+    let commandPosition = scopedArguments.first?.hasPrefix("--interaction=") == true ? 1 : 0
+    nativeWorkspaceSelection = WorkspaceSelectionEvidence(
+      requested: requestedWorkspace, operation: scopedArguments[commandPosition])
+  }
+  let (interactionMode, parsedArguments) = try interactionArguments(
+    scopedArguments)
+  if interactionMode == .foreground { foregroundInteraction = ForegroundInteraction() }
+  let request = try parseNativeRequest(parsedArguments)
+  let arguments = request.arguments
+  let uiOptions = request.uiOptions
+  let composeText = request.composeText
+  let page = request.page
+  let requestedPages = request.requestedPages
+  let pagesSeen = request.pagesSeen
+  let membersSeconds = request.membersSeconds
+  let sinceEpoch = request.sinceEpoch
+  let dmSearch = request.dmSearch
+  let allowClipboard = request.allowClipboard
+  if request.help {
     print(
       "Prefix --workspace=TARGET after optional --interaction=MODE to select one exact workspace before channels, dms, search, channel, read-channel, read-dm, read-thread, read-media, read-transcript or save-media. Selection and requested work share one process; paging and downloads never re-select after drift. Other commands reject the workspace prefix."
     )
@@ -11253,47 +11336,13 @@ do {
     )
     exit(0)
   }
-  if arguments == ["permissions"] || arguments == ["permissions", "--request"] {
-    exit(try permissions(request: arguments.count == 2))
+  if let permissionsRequest = request.permissionsRequest {
+    exit(try permissions(request: permissionsRequest))
   }
-  try require(
-    arguments == ["inspect"] || arguments == ["channels"] || arguments == ["dms"]
-      || arguments == ["workspaces"] || arguments == ["current-workspace"]
-      || arguments == ["close-thread"] || arguments == ["close-members"]
-      || arguments == ["browse-channels"] || arguments == ["browse-people"]
-      || (arguments.count == 2
-        && [
-          "search", "channel", "read-channel", "read-dm", "read-thread", "read-media",
-          "read-transcript", "save-media", "switch-workspace", "members", "send", "edit",
-          "delete",
-        ].contains(
-          arguments[0])),
-    nativeUsage
-  )
-  let requestedThread = arguments[0] == "read-thread" ? try MessageLink(arguments[1]) : nil
-  if ["read-media", "read-transcript", "save-media"].contains(arguments[0]) {
-    try require(
-      validMediaReference(arguments[1]),
-      "Use an attachment's file ID or MESSAGE/mN reference from read/search output")
-  }
-  let requestedGroup = arguments[0] == "read-dm" ? try groupDMIdentifier(arguments[1]) : nil
-  let requestedGroupName = arguments[0] == "read-dm" ? try groupDMName(arguments[1]) : nil
-  try require(
-    dmSearch == nil || dmSearch == "" || allowClipboard,
-    "Direct DMs search requires --allow-clipboard")
-  try require(
-    requestedGroupName == nil || page != nil || allowClipboard,
-    "Group-name lookup requires --allow-clipboard")
-  try require(
-    !allowClipboard || dmSearch != nil || (arguments[0] == "read-dm" && requestedGroup == nil)
-      || (arguments[0] == "send" && !arguments[1].hasPrefix("#")
-        && !arguments[1].hasPrefix("thread:") && !arguments[1].hasPrefix("group:")),
-    "--allow-clipboard requires direct DMs search or a name/handle DM read or send")
-  let composeLink =
-    ["edit", "delete"].contains(arguments[0])
-    ? try MessageLink(arguments[1])
-    : arguments[0] == "send" && arguments[1].hasPrefix("thread:")
-      ? try MessageLink(String(arguments[1].dropFirst("thread:".count))) : nil
+  let requestedThread = request.requestedThread
+  let requestedGroup = request.requestedGroup
+  let requestedGroupName = request.requestedGroupName
+  let composeLink = request.composeLink
   var batchDeadline = Date().addingTimeInterval(60)
   if !AXIsProcessTrusted() {
     exit(try permissions(request: false))
