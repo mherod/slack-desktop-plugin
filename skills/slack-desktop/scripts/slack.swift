@@ -573,6 +573,126 @@ func requireNoModal(_ root: AXUIElement) throws {
     )
   }
 }
+// Some Slack builds accept AXPress on navigation controls without acting on it,
+// or stop advertising it on sidebar rows, while the same control still opens on
+// Return once focused. Activation keeps AXPress first and falls back to one
+// focus-plus-Return only when the caller's verified after-state stays absent.
+enum ActivationMethod: String {
+  case press = "AXPress"
+  case focusReturn = "focus+Return"
+}
+struct FocusReturnEvidence: Equatable {
+  let targetFocused: Bool
+  let otherFocusedEditable: Bool
+  let queryOpen: Bool
+  let windowMatches: Bool
+  let alreadyOpened: Bool
+  let inputHeld: Bool
+}
+// Return goes to whatever holds focus, so it is posted only when the exact
+// target owns focus and no composer, text field or Search picker could take it.
+func focusReturnBlocker(_ evidence: FocusReturnEvidence) -> String? {
+  if evidence.alreadyOpened { return nil }
+  if !evidence.windowMatches { return "Slack window changed before Return; input withheld" }
+  if evidence.queryOpen { return "Search picker is open; navigation Return withheld" }
+  if evidence.otherFocusedEditable {
+    return "A text field or composer holds focus; Return withheld so no draft or query is submitted"
+  }
+  if !evidence.targetFocused { return "Control did not take focus; Return withheld" }
+  if evidence.inputHeld { return "Physical input held; input withheld" }
+  return nil
+}
+func editableFocus(_ role: String, _ classes: [String]) -> Bool {
+  ["AXTextArea", "AXTextField", "AXComboBox", "AXSearchField"].contains(role)
+    || classes.contains("ql-editor")
+}
+func activate(
+  _ element: AXUIElement, focusTarget: AXUIElement? = nil, _ workspace: Workspace,
+  window expected: Int, what: String, inputDeadline: Date? = nil, pressWait: TimeInterval = 2,
+  opened: () throws -> Bool
+) throws -> ActivationMethod {
+  let target = focusTarget ?? element
+  if (attr(element, kAXEnabledAttribute) as? Bool) == true,
+    actions(element).contains(kAXPressAction)
+  {
+    try requireGroupLookupBudget(inputDeadline)
+    try require(
+      try interactionAXAction(element, kAXPressAction as CFString) == .success,
+      "\(what) did not accept AXPress; no coordinate fallback attempted")
+    let until = min(Date().addingTimeInterval(pressWait), inputDeadline ?? .distantFuture)
+    repeat {
+      if try opened() { return .press }
+      settle(0.1)
+    } while Date() < until
+    if try opened() { return .press }
+  }
+  try require(
+    (attr(target, kAXEnabledAttribute) as? Bool) != false,
+    "\(what) is disabled; input withheld")
+  var settable: DarwinBoolean = false
+  try require(
+    AXUIElementIsAttributeSettable(target, kAXFocusedAttribute as CFString, &settable) == .success
+      && settable.boolValue,
+    "\(what) ignored AXPress and cannot take focus; no keyboard fallback attempted")
+  try requireGroupLookupBudget(inputDeadline)
+  try sampleDesktop("before-focus-activation")
+  try require(
+    try windowId(workspace.window, workspace.pid) == expected,
+    "Slack window changed before \(what) focus; input withheld")
+  try requireNoModal(workspace.window)
+  try require(
+    try queryFields(workspace.root()).isEmpty,
+    "Search picker is open; \(what) focus withheld")
+  try require(
+    try interactionAXValue(target, kAXFocusedAttribute as CFString, kCFBooleanTrue) == .success,
+    "\(what) refused focus; Return withheld")
+  settle(0.15)
+  let root = try workspace.root()
+  let focused = try focusedNodes(root)
+  let evidence = FocusReturnEvidence(
+    targetFocused: liveAttr(target, kAXFocusedAttribute) as? Bool == true
+      && focused.contains { CFEqual($0.element, target) },
+    otherFocusedEditable: focused.contains {
+      !CFEqual($0.element, target) && editableFocus(role($0.element), classes($0.element))
+    },
+    queryOpen: try !queryFields(root).isEmpty,
+    windowMatches: try windowId(workspace.window, workspace.pid) == expected,
+    alreadyOpened: try opened(),
+    inputHeld: !CGEventSource.flagsState(.combinedSessionState).intersection([
+      .maskCommand, .maskControl, .maskAlternate, .maskShift,
+    ]).isEmpty || NSEvent.pressedMouseButtons != 0)
+  if evidence.alreadyOpened {
+    recoverySteps.append("\(what) opened after AXPress while focus was being prepared")
+    return .press
+  }
+  if let blocker = focusReturnBlocker(evidence) { throw Failure(description: blocker) }
+  try requireNoModal(workspace.window)
+  try require(
+    CGPreflightPostEventAccess(),
+    "Post-event access unavailable in this execution context; input withheld. Run read-only permissions through the runner's approved execution context before considering macOS setup; do not replay input automatically"
+  )
+  func event(_ type: NSEvent.EventType) -> CGEvent? {
+    NSEvent.keyEvent(
+      with: type, location: .zero, modifierFlags: [],
+      timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: expected, context: nil,
+      characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36)?.cgEvent
+  }
+  guard let down = event(.keyDown), let emergencyUp = event(.keyUp) else {
+    throw Failure(description: "Cannot construct key event")
+  }
+  do {
+    try requireGroupLookupBudget(inputDeadline)
+    try requireForegroundInput()
+    AXWalkMemo.invalidate()
+    defer { (event(.keyUp) ?? emergencyUp).postToPid(workspace.pid) }
+    down.postToPid(workspace.pid)
+    axPause(until: Date().addingTimeInterval(0.04))
+  }
+  try sampleDesktop("after-focus-activation")
+  recoverySteps.append(
+    "\(what) ignored AXPress; activated it once with focus and one targeted Return")
+  return .focusReturn
+}
 // Reacquire renderer roots after transitions, without switching workspace/window.
 struct Workspace {
   let app: AXUIElement
@@ -1259,7 +1379,9 @@ func searchOrNavigate(
     try require(buttons.count == 1, "Search button ambiguous")
     try sampleDesktop("before-open-search")
     try requireGroupLookupBudget(groupDeadline)
-    try press(buttons[0].element, inputDeadline: groupDeadline)
+    _ = try activate(
+      buttons[0].element, workspace, window: id, what: "Search", inputDeadline: groupDeadline
+    ) { try !queryFields(workspace.root()).isEmpty }
     // Inspect readiness immediately; only an absent picker needs a polling wait.
     root = try workspace.root()
     let deadline = min(Date().addingTimeInterval(12), groupDeadline ?? .distantFuture)
@@ -1820,7 +1942,13 @@ func ensureSidebar(
     let home = try tree(root).filter(isHome)
     try require(home.count == 1, "Home tab unavailable or ambiguous; cannot expose sidebar")
     try sampleDesktop("before-home")
-    try press(home[0].element, inputDeadline: inputDeadline)
+    _ = try activate(
+      home[0].element, workspace, window: try windowId(workspace.window, running.processIdentifier),
+      what: "Home tab", inputDeadline: inputDeadline
+    ) {
+      root = try workspace.root()
+      return try !sidebars().isEmpty
+    }
     let deadline = min(Date().addingTimeInterval(5), inputDeadline ?? .distantFuture)
     while try sidebars().isEmpty && Date() < deadline {
       settle()
@@ -5360,10 +5488,20 @@ func navigateMediaSourceConversation(
         && CFEqual(fresh.row, selected.row) && CFEqual(fresh.control, selected.control),
       "Source sidebar target changed; input withheld")
     try sampleDesktop("before-source-sidebar-navigation")
-    try finalWindowInput(
+    _ = try finalWindowInput(
       window, currentWindow: { try windowId(workspace.window, workspace.pid) },
       noModal: { try requireNoModal(workspace.window) },
-      input: { try press(fresh.control, inputDeadline: deadline) })
+      input: {
+        try activate(
+          fresh.control, focusTarget: fresh.row, workspace, window: window,
+          what: "Source sidebar row", inputDeadline: deadline
+        ) {
+          guard let url = attr(try workspace.root(), kAXURLAttribute) as? URL else {
+            return false
+          }
+          return url.lastPathComponent == identifier
+        }
+      })
   } else {
     try require(
       !identifier.hasPrefix("D"),
@@ -5373,10 +5511,14 @@ func navigateMediaSourceConversation(
     let buttons = try tree(root).filter(searchButton)
     try require(buttons.count == 1, "Source lookup Search button is ambiguous")
     try sampleDesktop("before-source-id-search")
-    try finalWindowInput(
+    _ = try finalWindowInput(
       window, currentWindow: { try windowId(workspace.window, workspace.pid) },
       noModal: { try requireNoModal(workspace.window) },
-      input: { try press(buttons[0].element, inputDeadline: deadline) })
+      input: {
+        try activate(
+          buttons[0].element, workspace, window: window, what: "Search", inputDeadline: deadline
+        ) { try !queryFields(workspace.root()).isEmpty }
+      })
     let openDeadline = min(deadline, Date().addingTimeInterval(5))
     repeat {
       settle()
@@ -8940,9 +9082,15 @@ func readGroupDM(
     try windowId(workspace.window, running.processIdentifier) == window,
     "Slack window changed; group DM input withheld")
   try requireNoModal(workspace.window)
-  // Only the direct mpim group control was observed to navigate. A row AXPress
-  // can be accepted without navigation; there is no row or keyboard fallback.
-  try press(fresh.control)
+  // The direct mpim group control navigates on AXPress where Slack advertises it.
+  // A row AXPress can be accepted without navigation, so the row itself is only
+  // focused for one guarded Return once the control's press is absent or ignored.
+  _ = try activate(
+    fresh.control, focusTarget: fresh.row, workspace, window: window, what: "Group DM sidebar row"
+  ) {
+    guard let url = attr(try workspace.root(), kAXURLAttribute) as? URL else { return false }
+    return url.lastPathComponent == identifier
+  }
   let deadline = Date().addingTimeInterval(8)
   repeat {
     settle()
@@ -10461,7 +10609,10 @@ func ensureDMHub(_ workspace: Workspace, _ running: NSRunningApplication) throws
     "Slack window changed before DMs navigation")
   try requireNoModal(workspace.window)
   try sampleDesktop("immediately-before-open-dms-view")
-  try press(freshTabs[0].element)
+  _ = try activate(freshTabs[0].element, workspace, window: window, what: "DMs tab") {
+    guard let url = attr(try workspace.root(), kAXURLAttribute) as? URL else { return false }
+    return dmHubURL(url)
+  }
   let deadline = Date().addingTimeInterval(8)
   repeat {
     settle()

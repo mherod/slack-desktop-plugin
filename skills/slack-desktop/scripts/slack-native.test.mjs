@@ -5320,6 +5320,23 @@ check(composerDescriptionMatches("Message to general",name:"general",thread:fals
 check(composerDescriptionMatches("Reply to thread in general",name:nil,thread:true) && !composerDescriptionMatches("Reply to thread in ",name:nil,thread:true) && !composerDescriptionMatches("Message to general",name:"general",thread:true),"thread composer label uses the observed reply shape")
 check(threadBroadcastIdentifier("C1","1700000000.000001") == "p-thread_footer__broadcast_checkbox--C1-1700000000.000001--Thread","thread composer binding uses the exact conversation and root")
 check(validComposeText("line one\nline two") && !validComposeText("  \n ") && !validComposeText("bell\u{07}") && !validComposeText(String(repeating:"a",count:4001)),"message text is non-empty, bounded and free of controls other than newlines")
+// Activation fallback: Return is posted only to the exact focused navigation control.
+do {
+  let clean = FocusReturnEvidence(targetFocused: true, otherFocusedEditable: false, queryOpen: false, windowMatches: true, alreadyOpened: false, inputHeld: false)
+  func with(_ change: (inout [Bool]) -> Void) -> FocusReturnEvidence {
+    var v = [clean.targetFocused, clean.otherFocusedEditable, clean.queryOpen, clean.windowMatches, clean.alreadyOpened, clean.inputHeld]
+    change(&v)
+    return FocusReturnEvidence(targetFocused: v[0], otherFocusedEditable: v[1], queryOpen: v[2], windowMatches: v[3], alreadyOpened: v[4], inputHeld: v[5])
+  }
+  check(focusReturnBlocker(clean) == nil, "a focused target in the same window with no editor or picker may receive one Return")
+  check(focusReturnBlocker(with { $0[4] = true; $0[0] = false; $0[1] = true }) == nil, "a late AXPress result needs no Return and is never followed by one")
+  check(focusReturnBlocker(with { $0[1] = true })?.contains("composer") == true && focusReturnBlocker(with { $0[1] = true; $0[0] = false })?.contains("composer") == true, "a focused composer or text field always withholds Return so no draft is sent")
+  check(focusReturnBlocker(with { $0[0] = false }) == "Control did not take focus; Return withheld", "an unfocused target withholds Return")
+  check(focusReturnBlocker(with { $0[2] = true })?.contains("Search picker") == true && focusReturnBlocker(with { $0[3] = false })?.contains("window changed") == true && focusReturnBlocker(with { $0[5] = true }) == "Physical input held; input withheld", "an open picker, changed window or held physical input withholds Return")
+  check(editableFocus("AXTextArea", ["ql-editor", "ql-blank"]) && editableFocus("AXComboBox", []) && editableFocus("AXTextField", []) && editableFocus("AXGroup", ["ql-editor"]), "composers, query boxes and text fields count as editable focus")
+  check(!editableFocus("AXButton", ["c-button-unstyled", "p-top_nav__search"]) && !editableFocus("AXRow", ["p-channel_sidebar__static_list__item"]) && !editableFocus("AXRadioButton", ["p-tab_rail__button"]), "the Search button, sidebar rows and tab buttons are activation targets, not editors")
+  check(ActivationMethod.press.rawValue == "AXPress" && ActivationMethod.focusReturn.rawValue == "focus+Return", "activation receipts name the method used")
+}
 try checkDMQueryClipboard()
 print("Passed \(count) native Slack guard checks")
 `;
@@ -5337,7 +5354,7 @@ print("Passed \(count) native Slack guard checks")
       const inputs = await writeNativeSnapshot(guards, directory);
       const binary = path.join(directory, 'checks');
       await run(nativeCompileCommand(guards, inputs, binary), guards.recipe.compileTimeout);
-      expect(await run([binary], 10000)).toBe('Passed 6280 native Slack guard checks\n');
+      expect(await run([binary], 10000)).toBe('Passed 6288 native Slack guard checks\n');
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
