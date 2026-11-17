@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "slack-desktop",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Read, search and navigate Slack desktop on macOS with a bundled Swift accessibility helper.",
   "author": {
     "name": "Matthew Herod",

@@ -2612,13 +2612,15 @@ func threadSourceRows(_ root: AXUIElement, _ requested: MessageLink) throws -> [
 }
 // The requested message is in the open conversation but outside the exposed
 // rows. Scroll toward it one verified edge row at a time, within a bound.
-func exposeThreadSource(_ requested: MessageLink, _ workspace: Workspace) throws {
+func exposeThreadSource(
+  _ requested: MessageLink, _ workspace: Workspace, purpose: String = "toward the thread root"
+) throws {
   let target = requested.threadTS ?? requested.messageTS
   let deadline = Date().addingTimeInterval(25)
   var scrolls = 0
   defer {
     if scrolls > 0 {
-      recoverySteps.append("Scrolled the conversation \(scrolls) time(s) toward the thread root")
+      recoverySteps.append("Scrolled the conversation \(scrolls) time(s) \(purpose)")
     }
   }
   while scrolls < 20 && Date() < deadline {
@@ -8771,6 +8773,16 @@ func paginate(_ workspace: Workspace, _ target: [String: Any], _ page: PageReque
 {
   var root = try workspace.root()
   var rows = try pageRows(root, target)
+  // Another read can scroll the open conversation away from a continuation's boundary.
+  // Scroll the main list back toward it within the thread-source bound; only the same
+  // conversation ID is scrolled, and the exposed boundary is still required below.
+  if let page, target["kind"] as? String != "thread",
+    !rows.contains(where: { $0.timestamp == page.boundary.messageTS })
+  {
+    try exposeThreadSource(page.boundary, workspace, purpose: "back to the page cursor")
+    root = try workspace.root()
+    rows = try pageRows(root, target)
+  }
   let before = rows.map { $0.timestamp }
   var attempts = 0
   var status = "initial"
