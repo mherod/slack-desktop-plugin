@@ -66,10 +66,14 @@ describe('since boundary', () => {
     expect(applySince(source, undefined)).toBe(source);
   });
 
-  test('--since takes a date or ISO date-time and pages back up to ten pages', () => {
+  test('--since takes a date or ISO date-time and pages back up to thirty pages', () => {
     const parsed = parseCLI(['read-channel', 'demo', '--since=2026-01-31T09:00:00Z']);
     expect(parsed.since).toEqual({ requested: '2026-01-31T09:00:00Z', epoch: 1769850000 });
-    expect(parsed.pages).toBe(10);
+    // Paging stops once the start is reached, so the default goes deeper than --pages allows.
+    expect(parsed.pages).toBe(30);
+    expect(() => parseCLI(['read-channel', 'demo', '--since=2026-01-31', '--pages=11'])).toThrow(
+      '--pages must be an integer from 1 to 10'
+    );
     expect(parseCLI(['read-dm', '@alex', '--since=2026-01-31', '--pages=3']).pages).toBe(3);
     expect(parseCLI(['read-dm', '@alex', '--since=2026-01-31']).since.epoch).toBe(
       Math.floor(new Date('2026-01-31T00:00:00').getTime() / 1000)

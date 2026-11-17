@@ -11231,8 +11231,8 @@ func parseNativeRequest(_ input: [String]) throws -> NativeRequest {
         let value = String(flag.dropFirst("--pages=".count))
         try require(
           !request.pagesSeen
-            && value.range(of: #"^(?:[1-9]|10)$"#, options: .regularExpression) != nil,
-          "Specify --pages once with an integer from 1 to 10")
+            && value.range(of: #"^(?:[1-9]|[12][0-9]|30)$"#, options: .regularExpression) != nil,
+          "Specify --pages once with an integer from 1 to 10 (up to 30 with --since)")
         request.requestedPages = Int(value)!
         request.pagesSeen = true
       } else if flag.hasPrefix("--max-seconds=") {
@@ -11262,6 +11262,10 @@ func parseNativeRequest(_ input: [String]) throws -> NativeRequest {
     }
     arguments = Array(arguments.prefix(positionalCount))
   }
+  // Only a --since read may page past ten: it stops at its start, so the deeper budget is bounded.
+  try require(
+    request.requestedPages <= 10 || request.sinceEpoch != nil,
+    "Specify --pages once with an integer from 1 to 10 (up to 30 with --since)")
   request.arguments = arguments
   if arguments == ["--help"] {
     request.help = true
@@ -11347,7 +11351,9 @@ do {
   let requestedGroup = request.requestedGroup
   let requestedGroupName = request.requestedGroupName
   let composeLink = request.composeLink
-  var batchDeadline = Date().addingTimeInterval(60)
+  // A deeper --since collection keeps the 60-second budget per ten pages, capped at 150 seconds.
+  let batchSeconds = requestedPages > 10 ? 150 : 60
+  var batchDeadline = Date().addingTimeInterval(TimeInterval(batchSeconds))
   if !AXIsProcessTrusted() {
     exit(try permissions(request: false))
   }
@@ -11468,7 +11474,7 @@ do {
     nativeSelectedWorkspace = selected
     nativeWorkspaceScopeWindow = expected.windowId
     diagnosticExpectedScope["workspaceContext"] = "/client/" + expected.contextId
-    batchDeadline = Date().addingTimeInterval(60)
+    batchDeadline = Date().addingTimeInterval(TimeInterval(batchSeconds))
     try sampleDesktop("workspace-selection-complete")
   }
   if ["send", "edit", "delete"].contains(operation) {
@@ -11900,7 +11906,8 @@ do {
     while pages.count < requestedPages {
       if !pages.isEmpty && Date() >= batchDeadline {
         stopReason = "time-limit"
-        failure = "Multi-page read reached its 60-second budget; prior verified pages retained"
+        failure =
+          "Multi-page read reached its \(batchSeconds)-second budget; prior verified pages retained"
         break
       }
       attemptedPages += 1

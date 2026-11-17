@@ -1,4 +1,6 @@
 // Logical pages over independently verified Slack captures. No UI or persistence.
+// A --since read stops at its start, so it may page further than the ten pages --pages allows.
+export const MAX_SINCE_PAGES = 30;
 const timestampPattern = /^\d{10}\.\d{6}$/;
 const referencePattern = /^([CDG][A-Z0-9]+):(\d{10}\.\d{6})$/;
 const operations = new Set(['read-channel', 'read-dm', 'read-thread']);
@@ -257,7 +259,7 @@ export function collectPages(frames, batch, failure = {}, extract = (frame) => f
     batch &&
       Number.isInteger(batch.requestedPages) &&
       batch.requestedPages >= 2 &&
-      batch.requestedPages <= 10 &&
+      batch.requestedPages <= MAX_SINCE_PAGES &&
       Array.isArray(frames) &&
       frames.length > 0 &&
       batch.completedPages === frames.length &&

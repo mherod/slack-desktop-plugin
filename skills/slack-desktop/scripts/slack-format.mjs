@@ -11,6 +11,7 @@ import {
   validMessageReference,
   validSendDestination,
 } from './slack-compose.mjs';
+import { MAX_SINCE_PAGES } from './slack-pagination.mjs';
 
 const formats = new Set(['text', 'json', 'full-json']);
 const passThroughFlags = new Set(['--help', '--request']);
@@ -410,8 +411,9 @@ export function parseCLI(argv) {
       if (args.length !== 2 || !['read-channel', 'read-dm'].includes(args[0]))
         throw usageError('--since requires read-channel or read-dm');
       if (page?.direction === 'newer') throw usageError('--since cannot be combined with --after');
-      // Page back until the start is reached, within the ten-page maximum.
-      pages ??= 10;
+      // Page back until the start is reached. Paging stops there, so the default goes deeper
+      // than the ten pages --pages allows.
+      pages ??= MAX_SINCE_PAGES;
     }
     if (authorFilter !== undefined) {
       if (args.length !== 2 || !['read-channel', 'read-dm', 'search'].includes(args[0]))
@@ -1047,7 +1049,8 @@ function batchState(compact) {
     !batch ||
     !Number.isSafeInteger(batch.requestedPages) ||
     batch.requestedPages < 2 ||
-    batch.requestedPages > 10 ||
+    batch.requestedPages >
+      (['read-channel', 'read-dm'].includes(compact.operation) ? MAX_SINCE_PAGES : 10) ||
     !Number.isSafeInteger(batch.completedPages) ||
     batch.completedPages < 1 ||
     batch.completedPages > batch.requestedPages ||

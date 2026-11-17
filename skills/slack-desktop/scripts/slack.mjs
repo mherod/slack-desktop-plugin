@@ -405,7 +405,10 @@ try {
         (membersSeconds !== undefined
           ? (membersSeconds + 20) * 1000
           : extendedRuntime
-            ? 90000
+            ? // A --since read past ten pages has a 150-second native budget.
+              pages > 10
+              ? 180000
+              : 90000
             : 30000) + (workspaceTarget !== undefined ? 15000 : 0),
         true,
         () => {

@@ -598,7 +598,8 @@ describe('bounded Slack page collection', () => {
     const valid = { requestedPages: 3, attemptedPages: 1, completedPages: 1 };
     for (const overrides of [
       { requestedPages: 1 },
-      { requestedPages: 11 },
+      // A --since read may page up to 30; nothing goes beyond that.
+      { requestedPages: 31 },
       { requestedPages: 2.5 },
       { completedPages: 0 },
       { completedPages: 2 },

@@ -1985,7 +1985,7 @@ describe('multi-page options and text', () => {
     expect(parseCLI(['read-channel', 'project-help']).pages).toBe(3);
     expect(parseCLI(['read-channel', 'project-help', '--pages=1']).pages).toBe(1);
     expect(parseCLI(['read-channel', 'project-help', '--from=alex']).pages).toBe(5);
-    expect(parseCLI(['read-channel', 'project-help', '--since=2026-01-31']).pages).toBe(10);
+    expect(parseCLI(['read-channel', 'project-help', '--since=2026-01-31']).pages).toBe(30);
     expect(parseCLI(['read-dm', '@alex'])).not.toHaveProperty('pages');
     expect(parseCLI(['read-thread', 'CDEMO:1700000000.000001'])).not.toHaveProperty('pages');
   });
@@ -2157,7 +2157,7 @@ describe('multi-page options and text', () => {
   test('rejects malformed batch metadata and refuses records beyond the completed-page bound', () => {
     for (const invalid of [
       { requestedPages: 1 },
-      { requestedPages: 11 },
+      { requestedPages: 31 },
       { completedPages: 0 },
       { completedPages: 4 },
       { attemptedPages: 2 },

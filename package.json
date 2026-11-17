@@ -1,6 +1,6 @@
 {
   "name": "slack-desktop-plugin",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "private": true,
   "description": "Codex, ChatGPT and Claude Code plugin for reading and navigating Slack desktop on macOS.",
   "license": "MIT",
