@@ -775,7 +775,36 @@ const isMetadata = (node) =>
   node.classes.some((name) =>
     /^(?:p-composer|p-message_input|p-workspace__input|c-message_actions)/.test(name)
   );
-function renderBodyTokens(node, tree, links, verbatim = false, excludedNodes = new Set()) {
+// Search highlighting splits one paragraph into adjacent static-text runs ("From ", "BlackSmith",
+// " ^"). A run whose every word starts with, or begins, a term of the observed query is a highlight.
+export function searchHighlight(query) {
+  const terms = String(query ?? '')
+    .split(/\s+/)
+    .filter((term) => term && !/^-?[a-z]+:/i.test(term))
+    .map((term) => term.replace(/^["']+|["']+$/g, '').toLowerCase())
+    .filter((term) => /[\p{L}\p{N}]/u.test(term));
+  if (!terms.length) return null;
+  return (value) => {
+    const words = String(value ?? '')
+      .trim()
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(Boolean);
+    return (
+      words.length > 0 &&
+      words.every((word) => terms.some((term) => word.startsWith(term) || term.startsWith(word)))
+    );
+  };
+}
+
+function renderBodyTokens(
+  node,
+  tree,
+  links,
+  verbatim = false,
+  excludedNodes = new Set(),
+  highlight = null
+) {
   const literal = (value) => (value ? [{ value, emoji: false }] : []);
   if (excludedNodes.has(node.index)) return [];
   if (hasClass(node, 'c-search__expand')) return literal(' … ');
@@ -794,12 +823,16 @@ function renderBodyTokens(node, tree, links, verbatim = false, excludedNodes = n
     if (link && !links.some((item) => item.url === link.url && item.label === link.label))
       links.push(link);
     return children.length
-      ? children.flatMap((child) => renderBodyTokens(child, tree, links, verbatim, excludedNodes))
+      ? children.flatMap((child) =>
+          renderBodyTokens(child, tree, links, verbatim, excludedNodes, highlight)
+        )
       : literal(text(node));
   }
   if (node.role === 'AXStaticText')
     return children.length
-      ? children.flatMap((child) => renderBodyTokens(child, tree, links, verbatim, excludedNodes))
+      ? children.flatMap((child) =>
+          renderBodyTokens(child, tree, links, verbatim, excludedNodes, highlight)
+        )
       : literal(text(node));
   if (node.role === 'AXImage')
     return (hasClass(node, 'c-emoji') ||
@@ -808,13 +841,20 @@ function renderBodyTokens(node, tree, links, verbatim = false, excludedNodes = n
       ? [{ value: text(node), emoji: !verbatim }]
       : [];
   const body = children.flatMap((child, index) => {
-    const tokens = renderBodyTokens(child, tree, links, verbatim, excludedNodes);
-    // Adjacent AX static-text nodes can represent separate flattened paragraphs.
+    const tokens = renderBodyTokens(child, tree, links, verbatim, excludedNodes, highlight);
+    // Adjacent AX static-text nodes can represent separate flattened paragraphs, except where
+    // search highlighting split one paragraph around a matched term.
+    const previous = children[index - 1];
+    const highlighted =
+      highlight !== null &&
+      !verbatim &&
+      (highlight(text(child)) || highlight(text(previous)));
     const separator =
       tokens.length &&
       index > 0 &&
       child.role === 'AXStaticText' &&
-      children[index - 1].role === 'AXStaticText'
+      previous.role === 'AXStaticText' &&
+      !highlighted
         ? literal('\n')
         : [];
     return [...separator, ...tokens];
@@ -847,7 +887,7 @@ function joinBodyTokens(tokens) {
   return result;
 }
 
-function messageRecord(item, tree, conversationId, day, searchResult = false) {
+function messageRecord(item, tree, conversationId, day, searchResult = false, highlight = null) {
   const nodes = tree.descendants(item);
   const containers = nodes.filter(
     (node) =>
@@ -937,7 +977,7 @@ function messageRecord(item, tree, conversationId, day, searchResult = false) {
     const body = joinBodyTokens(
       tree
         .children(card)
-        .flatMap((node) => renderBodyTokens(node, tree, links, false, quoteExcluded))
+        .flatMap((node) => renderBodyTokens(node, tree, links, false, quoteExcluded, highlight))
     ).trim();
     return {
       author: source?.author ?? null,
@@ -950,7 +990,9 @@ function messageRecord(item, tree, conversationId, day, searchResult = false) {
   for (const card of cards) excludedNodes.add(card.index);
   const links = [];
   const body = joinBodyTokens(
-    bodyNodes.flatMap((node) => renderBodyTokens(node, tree, links, false, excludedNodes))
+    bodyNodes.flatMap((node) =>
+      renderBodyTokens(node, tree, links, false, excludedNodes, highlight)
+    )
   ).trim();
   const replies = nodes.filter(
     (node) =>
@@ -1868,8 +1910,9 @@ function searchSummary(tree, receipt, operation, query) {
           .match(/^[\d,]+/)[0]
           .replaceAll(',', '')
       );
+    const highlight = searchHighlight(observedQuery);
     messages = tree.children(list).map((item) => {
-      const record = messageRecord(item, tree, null, null, true);
+      const record = messageRecord(item, tree, null, null, true, highlight);
       const headers = tree
         .descendants(item)
         .filter((node) => hasClass(node, 'c-search_message__content_header'));

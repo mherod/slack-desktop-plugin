@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   compactOutput,
+  searchHighlight,
   structuredOutput,
   withDMNavigation,
   mediaObservationOutput,
@@ -1540,6 +1541,51 @@ describe('compact output for every command', () => {
     expect(() => compactOutput(f.receipt, 'search', 'changed')).toThrow('Search query changed');
     f.receipt.after.nodes[0].url += '/changed';
     expect(() => compactOutput(f.receipt, 'inspect')).toThrow('View changed');
+  });
+
+  test('keeps search snippets on one line where highlighting splits a paragraph', () => {
+    const f = fixture();
+    f.nodes[0].label = 'Search - Test Workspace - Slack';
+    f.nodes[0].url = 'https://app.slack.com/client/TDEMO/search';
+    f.nodes[f.list].label = 'Message results, page 1 of 1';
+    f.add(f.root, 'AXButton', [], 'Search: in:#project-help release notes');
+    const result = (runs) => {
+      const item = f.add(f.list, 'AXGroup', [], '');
+      const actions = f.add(item, 'AXGroup', ['c-message_kit__actions']);
+      const header = f.add(actions, 'AXGroup', ['c-search_message__content_header']);
+      f.add(header, 'AXButton', ['c-message__sender_button'], 'Sam Example');
+      const section = f.add(actions, 'AXGroup', ['p-rich_text_section']);
+      for (const run of runs) f.add(section, 'AXStaticText', [], run);
+    };
+    // Slack splits "Sending the release notes?" around each highlighted term.
+    result(['Sending the ', 'release', ' ', 'notes', '?']);
+    result(['Releases', '!']);
+    // Runs that are not highlighted terms keep the paragraph break.
+    result(['First paragraph', 'Second paragraph']);
+    f.receipt.after = {
+      nodes: [{ role: 'AXWebArea', label: f.nodes[0].label, url: f.nodes[0].url }],
+    };
+    const texts = compactOutput(f.receipt, 'search', 'in:#project-help release notes').messages.map(
+      (message) => message.text
+    );
+    expect(texts).toEqual([
+      'Sending the release notes?',
+      'Releases!',
+      'First paragraph\nSecond paragraph',
+    ]);
+  });
+
+  test('recognises highlighted runs from the query terms only', () => {
+    const highlight = searchHighlight('in:#project-help from:@sam "release notes" -draft');
+    expect(highlight('Release')).toBe(true);
+    expect(highlight('notes')).toBe(true);
+    expect(highlight('release notes')).toBe(true);
+    expect(highlight('releases')).toBe(true);
+    expect(highlight('Sending the ')).toBe(false);
+    expect(highlight('project')).toBe(false);
+    expect(highlight('draft')).toBe(false);
+    expect(highlight('')).toBe(false);
+    expect(searchHighlight('in:#project-help')).toBeNull();
   });
 
   test('keeps permission instructions and errors available in compact form', () => {
